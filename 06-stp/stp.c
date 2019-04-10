@@ -139,12 +139,104 @@ void *stp_timer_routine(void *arg)
 	return NULL;
 }
 
+/***************************************************/
+// return: true : config > p, false : config < p
+static bool packet2port_config_priority(struct stp_config *config, stp_port_t *p)
+{
+	if(ntohll(config->root_id) != p->designated_root)
+		return ntohll(config->root_id) < p->designated_root;
+	else if(ntohll(config->root_path_cost) != p->designated_cost)
+		return ntohll(config->root_path_cost) < p->designated_cost;
+	else if(ntohll(config->switch_id) != p->designated_switch)
+		return ntohll(config->switch_id) < p->designated_switch;
+	else
+		return ntohs(config->port_id) < p->designated_port;
+}
+
+static bool port2port_config_priority(stp_port_t *p1, stp_port_t *p2)
+{
+	if(p1->designated_root != p2->designated_root)
+		return p1->designated_root > p2->designated_root;
+	else if(p1->designated_cost != p2->designated_cost)
+		return p1->designated_cost > p2->designated_cost;
+	else if(p1->designated_switch != p2->designated_switch)
+		return p1->designated_switch > p2->designated_switch;
+	else
+		return p1->designated_port > p2->designated_port;
+}
+
 static void stp_handle_config_packet(stp_t *stp, stp_port_t *p,
 		struct stp_config *config)
 {
 	// TODO: handle config packet here
-	fprintf(stdout, "TODO: handle config packet here.\n");
+	//fprintf(stdout, "TODO: handle config packet here.\n");
+	if(packet2port_config_priority(config, p))
+	{
+		bool is_root = stp_is_root_switch(stp);
+
+		// update cur port
+		p->designated_root = ntohll(config->root_id);
+		p->designated_cost = ntohll(config->root_path_cost);
+		p->designated_switch = ntohll(config->switch_id);
+		p->designated_port = ntohs(config->port_id);
+
+		stp_port_t *root_p = NULL;
+		for(int i = 0; i < stp->nports; i++)
+		{
+			if(!stp_port_is_designated(&stp->ports[i]) &&\
+				(root_p == NULL || port2port_config_priority(root_p, &stp->ports[i])))
+			{
+				root_p = &stp->ports[i];
+			}
+		}
+
+		if(root_p == NULL)
+		{
+			stp->root_port = NULL;
+			stp->designated_root = stp->switch_id;
+			stp->root_path_cost = 0;
+		}
+		else
+		{
+			stp->root_port = root_p;
+			stp->designated_root = root_p->designated_root;
+			stp->root_path_cost = root_p->designated_cost + root_p->path_cost;
+		}
+
+		for(int i = 0; i < stp->nports; i++)
+		{
+			if(!stp_port_is_designated(&stp->ports[i]) &&\
+				stp->ports[i].designated_cost > stp->root_path_cost)
+			{
+				stp->ports[i].designated_switch = stp->switch_id;
+				stp->ports[i].designated_port   = stp->ports[i].port_id;
+			}
+
+			if(stp_port_is_designated(&stp->ports[i]))
+			{
+				stp->ports[i].designated_root = stp->designated_root;
+				stp->ports[i].designated_cost = stp->root_path_cost;
+			}
+		}
+
+		if(is_root && stp_is_root_switch(stp))
+		{
+			stp_stop_timer(&stp->hello_timer);
+		}
+
+		stp_send_config(stp);
+	}
+	else
+	{
+		p->designated_switch = stp->switch_id;
+		p->designated_root = stp->designated_root;
+		p->designated_port = p->port_id;
+		p->designated_cost = stp->root_path_cost;
+		stp_port_send_config(p);
+	}
 }
+
+/***************************************************/
 
 static void *stp_dump_state(void *arg)
 {
