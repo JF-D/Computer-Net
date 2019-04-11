@@ -227,7 +227,7 @@ static void stp_handle_config_packet(stp_t *stp, stp_port_t *p,
 			}
 		}
 
-		if(is_root && stp_is_root_switch(stp))
+		if(is_root && !stp_is_root_switch(stp))
 		{
 			stp_stop_timer(&stp->hello_timer);
 		}
