@@ -53,8 +53,23 @@ void arpcache_destroy()
 // and mac address with the given arguments
 int arpcache_lookup(u32 ip4, u8 mac[ETH_ALEN])
 {
-	fprintf(stderr, "TODO: lookup ip address in arp cache.\n");
-	return 0;
+	//fprintf(stderr, "TODO: lookup ip address in arp cache.\n");
+	int find = 0;
+
+	pthread_mutex_lock(&arpcache.lock);
+	for(int i = 0; i < MAX_ARP_SIZE; i++)
+	{
+		if(arpcache.entries[i].valid && ip4 == arpcache.entries[i].ip4)
+		{
+			find = 1;
+			memcpy(mac, arpcache.entries[i].mac, ETH_ALEN);
+			break;
+		}
+	}
+	
+	pthread_mutex_unlock(&arpcache.lock);
+
+	return find;
 }
 
 // append the packet to arpcache
@@ -66,7 +81,38 @@ int arpcache_lookup(u32 ip4, u8 mac[ETH_ALEN])
 // with the given IP address and iface, append the packet, and send arp request.
 void arpcache_append_packet(iface_info_t *iface, u32 ip4, char *packet, int len)
 {
-	fprintf(stderr, "TODO: append the ip address if lookup failed, and send arp request if necessary.\n");
+	//fprintf(stderr, "TODO: append the ip address if lookup failed, and send arp request if necessary.\n");
+	struct cached_pkt *pkt_entry = (struct cached_pkt*)malloc(sizeof(struct cached_pkt));
+	init_list_head(&pkt_entry->list);
+	pkt_entry->packet = packet;
+	pkt_entry->len = len;
+
+	pthread_mutex_lock(&arpcache.lock);
+
+	struct arp_req *req_entry = NULL;
+	list_for_each_entry(req_entry, &(arpcache.req_list), list)
+	{
+		if(req_entry->iface == iface && req_entry->ip4 == ip4)
+		{
+			list_add_tail(&pkt_entry->list, &req_entry->cached_packets);
+			pthread_mutex_unlock(&arpcache.lock);
+			return ;		
+		}
+	}
+
+	req_entry = (struct arp_req*)malloc(sizeof(struct arp_req));
+	init_list_head(&req_entry->list);
+	req_entry->iface = iface;
+	req_entry->ip4 = ip4;
+	req_entry->sent = time(NULL);
+	req_entry->retries = 0;
+	init_list_head(&req_entry->cached_packets);
+
+	list_add_tail(&req_entry->list, &arpcache.req_list);
+	list_add_tail(&pkt_entry->list, &req_entry->cached_packets);
+
+	pthread_mutex_unlock(&arpcache.lock);
+
 }
 
 // insert the IP->mac mapping into arpcache, if there are pending packets
@@ -74,7 +120,45 @@ void arpcache_append_packet(iface_info_t *iface, u32 ip4, char *packet, int len)
 // them out
 void arpcache_insert(u32 ip4, u8 mac[ETH_ALEN])
 {
-	fprintf(stderr, "TODO: insert ip->mac entry, and send all the pending packets.\n");
+	//fprintf(stderr, "TODO: insert ip->mac entry, and send all the pending packets.\n");
+	int t = rand() % MAX_ARP_SIZE;
+	
+	pthread_mutex_lock(&arpcache.lock);
+	for(int i = 0; i < MAX_ARP_SIZE; i++)
+		if(!arpcache.entries[i].valid)
+		{
+			t = i;
+			break;
+		}
+	
+	arpcache.entries[t].ip4 = ip4;
+	for(int i = 0; i < ETH_ALEN; i++)
+		arpcache.entries[t].mac[i] = mac[i];
+	arpcache.entries[t].added = time(NULL);
+	arpcache.entries[t].valid = 1;
+
+	struct arp_req *req_entry = NULL;
+	list_for_each_entry(req_entry, &(arpcache.req_list), list)
+	{
+		if(req_entry->ip4 == ip4)
+		{
+			struct cached_pkt *pkt_entry = NULL, *pkt_q;
+			list_for_each_entry_safe(pkt_entry, pkt_q, &(req_entry->cached_packets), list)
+			{
+				iface_send_packet(req_entry->iface, pkt_entry->packet, pkt_entry->len);
+				list_delete_entry(&(pkt_entry->list));
+				free(pkt_entry);
+			}
+			
+			list_delete_entry(&(req_entry->list));
+			free(req_entry);
+			
+			pthread_mutex_unlock(&arpcache.lock);
+			return ;		
+		}
+	}
+
+	pthread_mutex_unlock(&arpcache.lock);
 }
 
 // sweep arpcache periodically
@@ -90,7 +174,32 @@ void *arpcache_sweep(void *arg)
 {
 	while (1) {
 		sleep(1);
-		fprintf(stderr, "TODO: sweep arpcache periodically: remove old entries, resend arp requests .\n");
+		//fprintf(stderr, "TODO: sweep arpcache periodically: remove old entries, resend arp requests .\n");
+		time_t now = time(NULL);
+		pthread_mutex_lock(&arpcache.lock);
+
+		struct arp_req *req_entry = NULL, *req_q;
+		list_for_each_entry_safe(req_entry, req_q, &(arpcache.req_list), list)
+		{
+			if(req_entry->retries > ARP_REQUEST_MAX_RETRIES)
+			{
+				struct cached_pkt *pkt_entry = NULL, *pkt_q;
+				list_for_each_entry_safe(pkt_entry, pkt_q, &(req_entry->cached_packets), list) {
+					icmp_send_packet(pkt_entry->packet, pkt_entry->len, ICMP_DEST_UNREACH, ICMP_HOST_UNREACH);
+					list_delete_entry(&(pkt_entry->list));
+					free(pkt_entry);
+				}
+
+				list_delete_entry(&(req_entry->list));
+				free(req_entry);
+			}
+			else if(now - req_entry->sent > ARP_ENTRY_TIMEOUT)
+			{
+				req_entry->sent = now;
+				req_entry->retries ++;
+				arp_send_request(req_entry->iface, req_entry->ip4);
+			}
+		}
 	}
 
 	return NULL;
