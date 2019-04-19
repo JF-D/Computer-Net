@@ -60,16 +60,16 @@ void ip_send_packet(char *packet, int len)
 	
 	if(!rt_entry)
 	{
-		log(ERROR, "Could not find next hop for IP (dst:" IP_FMT, HOST_IP_FMT_STR(dst));
+		//log(ERROR, "Could not find next hop for IP (dst:" IP_FMT ")", HOST_IP_FMT_STR(dst));
 		free(packet);
 		return ;
 	}
 	
 	//IP
-	ip_init_hdr(iph_pkt, rt_entry->iface->ip, ntohl(iph->daddr), IP_BASE_HDR_SIZE, IPPROTO_ICMP);
+	ip_init_hdr(iph, rt_entry->iface->ip, ntohl(iph->daddr), IP_BASE_HDR_SIZE, IPPROTO_ICMP);
 
 	u32 next_hop = rt_entry->gw;
 	if(!next_hop) next_hop = dst;
 
-	iface_send_packet_by_arp(rt_entry->iface, next_hop, icmp_pkt, len);
+	iface_send_packet_by_arp(rt_entry->iface, next_hop, packet, len);
 }

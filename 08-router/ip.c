@@ -1,4 +1,7 @@
 #include "ip.h"
+#include "arp.h"
+#include "icmp.h"
+#include "rtable.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,7 +40,6 @@ void ip_forward_packet(u32 dst, char *packet, int len)
 void handle_ip_packet(iface_info_t *iface, char *packet, int len)
 {
 	//fprintf(stderr, "TODO: handle ip packet.\n");
-	struct ether_header *eh = (struct ether_header *)packet;
 	struct iphdr *iph = packet_to_ip_hdr(packet);
 
 	if(iph->protocol == IPPROTO_ICMP)

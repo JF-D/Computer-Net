@@ -76,7 +76,6 @@ void arp_send_reply(iface_info_t *iface, struct ether_arp *req_hdr)
 void handle_arp_packet(iface_info_t *iface, char *packet, int len)
 {
 	//fprintf(stderr, "TODO: process arp packet: arp request & arp reply.\n");
-	struct ether_header *eh = (struct ether_header*)packet;
 	struct ether_arp *arp = (struct ether_arp*)(packet + ETHER_HDR_SIZE);
 
 	int arp_type = ntohs(arp->arp_op);
@@ -92,7 +91,7 @@ void handle_arp_packet(iface_info_t *iface, char *packet, int len)
 		if(ntohs(arp->arp_tpa) != iface->ip)
 			return ;
 	}
-	
+
 	arpcache_insert(ntohl(arp->arp_spa), arp->arp_tha);
 }
 
