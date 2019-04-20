@@ -1,3 +1,5 @@
+#include "ip.h"
+#include "log.h"
 #include "arp.h"
 #include "base.h"
 #include "types.h"
@@ -68,7 +70,7 @@ void arp_send_reply(iface_info_t *iface, struct ether_arp *req_hdr)
 
 	arp->arp_spa = htonl(iface->ip);
 	arp->arp_tpa = req_hdr->arp_spa;
-	
+
 	//send
 	iface_send_packet(iface, packet, len);
 }
@@ -77,22 +79,23 @@ void handle_arp_packet(iface_info_t *iface, char *packet, int len)
 {
 	//fprintf(stderr, "TODO: process arp packet: arp request & arp reply.\n");
 	struct ether_arp *arp = (struct ether_arp*)(packet + ETHER_HDR_SIZE);
-
+	
 	int arp_type = ntohs(arp->arp_op);
+	
 	if(arp_type == ARPOP_REQUEST)
 	{
-		if(ntohs(arp->arp_tpa) != iface->ip)
+		if(ntohl(arp->arp_tpa) != iface->ip)
 			return ;
 		
 		arp_send_reply(iface, arp);
 	}
 	else if(arp_type == ARPOP_REPLY)
 	{
-		if(ntohs(arp->arp_tpa) != iface->ip)
-			return ;
+		if(ntohl(arp->arp_tpa) != iface->ip)
+			return ;		
 	}
 
-	arpcache_insert(ntohl(arp->arp_spa), arp->arp_tha);
+	arpcache_insert(ntohl(arp->arp_spa), arp->arp_sha);
 }
 
 // send (IP) packet through arpcache lookup 
@@ -109,12 +112,12 @@ void iface_send_packet_by_arp(iface_info_t *iface, u32 dst_ip, char *packet, int
 	u8 dst_mac[ETH_ALEN];
 	int found = arpcache_lookup(dst_ip, dst_mac);
 	if (found) {
-		// log(DEBUG, "found the mac of %x, send this packet", dst_ip);
+		//log(DEBUG, "found the mac of %x, send this packet", dst_ip);
 		memcpy(eh->ether_dhost, dst_mac, ETH_ALEN);
 		iface_send_packet(iface, packet, len);
 	}
 	else {
-		// log(DEBUG, "lookup %x failed, pend this packet", dst_ip);
+		//log(DEBUG, "lookup "IP_FMT" failed, pend this packet", HOST_IP_FMT_STR(dst_ip));
 		arpcache_append_packet(iface, dst_ip, packet, len);
 	}
 }

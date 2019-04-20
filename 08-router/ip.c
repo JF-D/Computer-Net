@@ -13,6 +13,7 @@ void ip_forward_packet(u32 dst, char *packet, int len)
 	if(iph->ttl <= 0)
 	{
 		icmp_send_packet(packet, len, ICMP_TIME_EXCEEDED, ICMP_EXC_TTL);
+		free(packet);
 		return ;
 	}
 
@@ -29,6 +30,7 @@ void ip_forward_packet(u32 dst, char *packet, int len)
 	else
 	{
 		icmp_send_packet(packet, len, ICMP_DEST_UNREACH, ICMP_NET_UNREACH);
+		free(packet);
 	}
 }
 
@@ -47,7 +49,8 @@ void handle_ip_packet(iface_info_t *iface, char *packet, int len)
 		struct icmphdr *icmp = (struct icmphdr*)((char *)iph + IP_HDR_SIZE(iph));
 		if(icmp->type == ICMP_ECHOREQUEST && ntohl(iph->daddr) == iface->ip)
 		{
-			ip_send_packet(packet, len);
+			icmp_send_packet(packet, len, ICMP_ECHOREPLY, 0);
+			free(packet);
 			return ;
 		}
 	}

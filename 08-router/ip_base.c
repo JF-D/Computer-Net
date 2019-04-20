@@ -35,7 +35,7 @@ rt_entry_t *longest_prefix_match(u32 dst)
 	list_for_each_entry(rt_entry, &rtable, list)
 	{
 		u32 ip = dst & rt_entry->mask;
-		if((ip == rt_entry->dest & rt_entry->mask) &&
+		if((ip == (rt_entry->dest & rt_entry->mask)) &&
 			(max_rt_entry == NULL || max_rt_entry->mask < rt_entry->mask))
 		{
 			max_rt_entry = rt_entry;
@@ -52,7 +52,6 @@ rt_entry_t *longest_prefix_match(u32 dst)
 void ip_send_packet(char *packet, int len)
 {
 	//fprintf(stderr, "TODO: send ip packet.\n");
-	struct ether_header *eh = (struct ether_header *)packet;
 	struct iphdr *iph = packet_to_ip_hdr(packet);
 
 	u32 dst = ntohl(iph->daddr);
@@ -66,7 +65,7 @@ void ip_send_packet(char *packet, int len)
 	}
 	
 	//IP
-	ip_init_hdr(iph, rt_entry->iface->ip, ntohl(iph->daddr), IP_BASE_HDR_SIZE, IPPROTO_ICMP);
+	ip_init_hdr(iph, rt_entry->iface->ip, ntohl(iph->daddr), len - ETHER_HDR_SIZE, IPPROTO_ICMP);
 
 	u32 next_hop = rt_entry->gw;
 	if(!next_hop) next_hop = dst;
