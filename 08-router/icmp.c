@@ -15,7 +15,7 @@ void icmp_send_packet(const char *in_pkt, int len, u8 type, u8 code)
 	struct icmphdr *icmp_pkt = (struct icmphdr*)((char *)iph_pkt + IP_HDR_SIZE(iph_pkt));
 
 	int packet_sz;
-	if(icmp_pkt->type == ICMP_ECHOREQUEST)
+	if(type == 0 && code == 0)
 		packet_sz = len + IP_BASE_HDR_SIZE - IP_HDR_SIZE(iph_pkt);
 	else
 		packet_sz = ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + ICMP_HDR_SIZE + \
@@ -32,12 +32,12 @@ void icmp_send_packet(const char *in_pkt, int len, u8 type, u8 code)
 	icmp->type = type;
 	icmp->code = code;
 	
-	if(icmp_pkt->type == ICMP_ECHOREQUEST)
+	if(type == 0 && code == 0)
 		memcpy(rest_icmp, (char *)icmp_pkt + 4, len - ETHER_HDR_SIZE - IP_HDR_SIZE(iph_pkt) - 4);
 	else
 	{
 		memset(rest_icmp, 0, 4);
-		memcpy(rest_icmp+4, (char *)iph_pkt, IP_HDR_SIZE(iph) + ICMP_COPIED_DATA_LEN);
+		memcpy(rest_icmp+4, (char *)iph_pkt, IP_BASE_HDR_SIZE + ICMP_COPIED_DATA_LEN);
 	}
 
 	icmp->checksum = icmp_checksum(icmp, packet_sz - ETHER_HDR_SIZE - IP_BASE_HDR_SIZE);
