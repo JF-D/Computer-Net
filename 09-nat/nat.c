@@ -299,9 +299,15 @@ int parse_config(const char *filename)
 				continue;
 
 			if (strcmp(strings[0], "internal-iface:") == 0)
-				nat.internal_iface = if_name_to_iface("n1-eth0");
+			{
+				strings[1][strlen(strings[1])-1] = '\0';
+				nat.internal_iface = if_name_to_iface(strings[1]);
+			}
 			else if (strcmp(strings[0], "external-iface:") == 0)
-				nat.external_iface = if_name_to_iface("n1-eth1");
+			{
+				strings[1][strlen(strings[1])-1] = '\0';
+				nat.external_iface = if_name_to_iface(strings[1]);
+			}
 			else if (strcmp(strings[0], "dnat-rules:") == 0) {
 				struct dnat_rule *rule = (struct dnat_rule*)malloc(sizeof(struct dnat_rule));
 				read_ip_port(strings[1], &rule->external_ip, &rule->external_port);
