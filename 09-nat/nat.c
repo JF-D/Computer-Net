@@ -104,6 +104,7 @@ void do_translation(iface_info_t *iface, char *packet, int len, int dir)
 			{
 				icmp_send_packet(packet, len, ICMP_DEST_UNREACH, ICMP_HOST_UNREACH);
 				free(packet);
+				pthread_mutex_unlock(&nat.lock);
 				return ;
 			}
 		}
@@ -167,6 +168,7 @@ void do_translation(iface_info_t *iface, char *packet, int len, int dir)
 			{
 				icmp_send_packet(packet, len, ICMP_DEST_UNREACH, ICMP_HOST_UNREACH);
 				free(packet);
+				pthread_mutex_unlock(&nat.lock);
 				return ;
 			}
 		}
