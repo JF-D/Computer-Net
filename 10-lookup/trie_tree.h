@@ -6,18 +6,16 @@
 
 struct trie_node {
     u8 isIP;
-    u32 ip;
-    u32 mask;
     struct trie_node *child[2];
 };
 
 typedef struct trie_node trie_tree_t;
 typedef struct trie_node trie_node_t;
 
-trie_tree_t iptree;
+trie_tree_t *iptree;
 
 trie_node_t *trie_lookup(u32 ip, u32 mask);
-trie_node_t *new_trie_node(u8 isIP, u32 ip, u32 mask);
+trie_node_t *new_trie_node(u8 isIP);
 int insert_trie_node(u32 ip, u32 mask);
 
 #define IP_FMT	"%hhu.%hhu.%hhu.%hhu"
