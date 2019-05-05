@@ -35,5 +35,5 @@ void dfs(multi_trie_node_t *multi_trie);
 void dfs_build(multi_trie_node_t *multi_trie, poptrie_node_t *pop_trie);
 void build_poptrie(multi_trie_node_t *multi_trie);
 u32 poptrie_lookup(u32 ip);
-
+u32 multi_trie_lookup(u32 ip);
 #endif

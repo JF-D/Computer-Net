@@ -29,13 +29,31 @@ void insert_multi_trie_node(u32 ip, u32 mask)
 
     u32 ind = (ip >> (32-k)) & 0x0F;
     u32 t = 1;
-    for(int i = 0; i < mask%4; i++)
+    for(int i = 0; mask%4 && i < 4 - mask%4; i++)
         t *= 2;
     for(u32 i = 0; i < t; i++)
     {
         p->isIP |= ((u16)1 << (ind+i));
         p->mask[ind+i] = max(p->mask[ind+i], mask);
     }
+}
+
+u32 multi_trie_lookup(u32 ip)
+{
+    multi_trie_node_t *p = multi_trie;
+    u32 find = 0, offset = 0;
+    u16 v = (ip >> (28 - offset)) & 0x0F;
+    while(p)
+    {
+        if(p->isIP & (1ULL << v))
+            find = p->mask[v];
+        
+        p = p->child[v];
+        offset += 4;
+        v = (ip >> (28 - offset)) & 0x0F;
+    }
+
+    return find;
 }
 
 u32 nodes = 0, leafs = 0;

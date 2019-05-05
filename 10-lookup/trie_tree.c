@@ -31,7 +31,7 @@ int insert_trie_node(u32 ip, u32 mask)
         return 0;
     }
     
-    p->isIP = 1;
+    p->isIP = mask;
     return 1;
 }
 
@@ -42,9 +42,9 @@ u32 trie_lookup(u32 ip, u32 mask)
     while(p)
     {
         if(p->isIP)
-            find = k-1;
+            find = p->isIP;
         
-        u32 ind = (ip >> (32-k)) & 0x1;
+        u32 ind = (ip >> (32UL-k)) & 0x1;
         p = p->child[ind];
         k++;
     }
