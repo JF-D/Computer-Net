@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "trie_tree.h"
+#include "poptrie.h"
 
 int read_ip_port(FILE *input, u32 *ip, u32 *mask)
 {
@@ -51,6 +52,37 @@ int main()
     }
     fclose(input);
     fclose(output);
+
+    input = fopen("forwarding-table.txt", "r");
+    multi_trie = new_multi_trie_node();
+    while(read_ip_port(input, &ip, &mask))
+    {
+        insert_multi_trie_node(ip, mask);
+    }
+    fclose(input);
+
+    build_poptrie(multi_trie);
+
+    input = fopen("forwarding-table.txt", "r");
+    output = fopen("poptrie-lookup-table.txt", "wr");
+    while(read_ip_port(input, &ip, &mask))
+    {
+        u32 p = poptrie_lookup(ip);
+        fprintf(output, IP_FMT" %u\n", HOST_IP_FMT_STR(ip), p);
+    }
+    fclose(input);
+    fclose(output);
+
+    //compare result
+    input = fopen("lookup-table.txt", "r");
+    output = fopen("poptrie-lookup-table.txt", "r");
+    char s[50];
+    u32 mask1, mask2;
+    while(fscanf(input, "%s%u", s, &mask1) != 0 && fscanf(output, "%s%u", s, &mask2) != 0)
+    {
+        if(mask1 != mask2)
+            printf("ERROR: poptrie lookup %s wrong, expected: %u, get: %u\n", s, mask1, mask2);
+    }
 
     return 0;
 }
