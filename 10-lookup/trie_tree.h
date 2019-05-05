@@ -14,7 +14,7 @@ typedef struct trie_node trie_node_t;
 
 trie_tree_t *iptree;
 
-trie_node_t *trie_lookup(u32 ip, u32 mask);
+u32 trie_lookup(u32 ip, u32 mask);
 trie_node_t *new_trie_node(u8 isIP);
 int insert_trie_node(u32 ip, u32 mask);
 

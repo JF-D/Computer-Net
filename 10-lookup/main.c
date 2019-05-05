@@ -32,7 +32,7 @@ void dump_iptree(trie_node_t *tree, int tab)
 int main()
 {
     FILE *input = fopen("forwarding-table.txt", "r");
-    iptree = new_trie_node(0, 0, 0);
+    iptree = new_trie_node(0);
     u32 ip, mask;
     while(read_ip_port(input, &ip, &mask))
     {
