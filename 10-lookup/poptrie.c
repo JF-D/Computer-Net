@@ -107,6 +107,9 @@ void build_poptrie(multi_trie_node_t *multi_trie)
     L = (poptrie_leaf_t *)malloc(sizeof(poptrie_leaf_t) * leafs);
     memset(N, 0, sizeof(N));
     memset(L, 0, sizeof(L));
+    printf("poptrie malloc size: %lu (%u nodes, %u leaves)\n", 
+        sizeof(poptrie_node_t) * nodes + sizeof(poptrie_leaf_t) * leafs, nodes, leafs);
+    printf("\n");
 
     poptrie = N;
     dfs_build(multi_trie, poptrie);
@@ -117,14 +120,25 @@ u32 poptrie_lookup(u32 ip)
     u32 ind = 0, offset = 0;
     u16 vector = N[0].vector;
     u16 v = (ip >> (28 - offset)) & 0x0F;
+    u32 bc, ret = 0;
     while(vector & (1ULL << v))
     {
-        u32 bc = popcnt(vector & (((u32)2 << v) - 1));
+        if((N[ind].leafvec) & (1ULL << v))
+        {
+            bc = popcnt((N[ind].leafvec) & ((2ULL << v) - 1));
+            ret = L[N[ind].base0 + bc - 1];
+        }
+        bc = popcnt(vector & (((u32)2 << v) - 1));
         ind = N[ind].base1 + bc - 1;
         vector = N[ind].vector;
         offset += 4;
         v = (ip >> (28 - offset)) & 0x0F;
     }
-    u32 bc = popcnt((N[ind].leafvec) & ((2ULL << v) - 1));
-    return L[N[ind].base0 + bc - 1];
+
+    if((N[ind].leafvec) & (1ULL << v))
+    {
+        bc = popcnt((N[ind].leafvec) & ((2ULL << v) - 1));
+        ret = L[N[ind].base0 + bc - 1];
+    }
+    return ret;
 }

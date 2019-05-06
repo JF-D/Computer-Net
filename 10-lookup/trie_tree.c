@@ -3,9 +3,12 @@
 #include "types.h"
 #include "log.h"
 
+u32 trie_malloc_sz = 0;
+
 trie_node_t *new_trie_node(u8 isIP)
 {
     trie_node_t *trie = (trie_node_t *)malloc(sizeof(trie_node_t));
+    trie_malloc_sz ++;
     trie->isIP = isIP;
     for(int i = 0; i < 2; i++)
         trie->child[i] = NULL;
@@ -35,7 +38,7 @@ int insert_trie_node(u32 ip, u32 mask)
     return 1;
 }
 
-u32 trie_lookup(u32 ip, u32 mask)
+u32 trie_lookup(u32 ip)
 {
     trie_node_t *p = iptree;
     u32 find = 0, k = 1;

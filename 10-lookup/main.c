@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <sys/time.h>
 #include "trie_tree.h"
 #include "poptrie.h"
 
@@ -7,7 +8,8 @@ int read_ip_port(FILE *input, u32 *ip, u32 *mask)
 	int i1, i2, i3, i4, port;
 	int ret = fscanf(input, "%d.%d.%d.%d%u%d", &i1, &i2, &i3, &i4, mask, &port);
 	if (ret != 6) {
-		printf("parse ip-mask string error(ret = %d)!\n", ret);
+        if(ret != -1)
+		    printf("parse ip-mask string error(ret = %d)!\n", ret);
 		return 0;
 	}
 
@@ -30,30 +32,44 @@ void dump_iptree(trie_node_t *tree, int tab)
             dump_iptree(p->child[k], tab+1);
 }
 
+extern u32 trie_malloc_sz;
+u32 all_ip[700000];
+
 int main()
 {
     FILE *input = fopen("forwarding-table.txt", "r");
     iptree = new_trie_node(0);
-    u32 ip, mask;
+    u32 ip, mask, num = 0;
+
+    printf("build the basic ip trie...\n");
     while(read_ip_port(input, &ip, &mask))
     {
         int ret = insert_trie_node(ip, mask);
+        all_ip[num++] = ip;
     }
     fclose(input);
+    printf("trie malloc size: %lu (%u nodes)\n", trie_malloc_sz*sizeof(trie_node_t), trie_malloc_sz);
+    printf("\n");
 
     //dump_iptree(iptree, 0);
+    struct timeval tv1, tv2;
 
-    input = fopen("forwarding-table.txt", "r");
+    printf("lookup the basic ip trie...\n");
     FILE *output = fopen("lookup-table.txt", "wr");
-    while(read_ip_port(input, &ip, &mask))
+
+    gettimeofday(&tv1, NULL);
+    for(int i = 0; i < num; i++)
     {
-        u32 p = trie_lookup(ip, mask);
-        fprintf(output, IP_FMT" %u\n", HOST_IP_FMT_STR(ip), p);
+        u32 p = trie_lookup(all_ip[i]);
+        //fprintf(output, IP_FMT" %u\n", HOST_IP_FMT_STR(ip), p);
     }
-    fclose(input);
+    gettimeofday(&tv2, NULL);
+    printf("trie time per lookup: %.2lf ns.\n", (1000.0*(tv2.tv_sec*1000000+tv2.tv_usec-tv1.tv_sec*1000000-tv1.tv_usec))/num);
     fclose(output);
 
     input = fopen("forwarding-table.txt", "r");
+
+    printf("\nbuild the multi-key ip trie...\n");
     multi_trie = new_multi_trie_node();
     while(read_ip_port(input, &ip, &mask))
     {
@@ -61,29 +77,40 @@ int main()
     }
     fclose(input);
 
+    printf("build the poptrie ip trie through multi-key ip trie...\n");
     build_poptrie(multi_trie);
 
-    input = fopen("forwarding-table.txt", "r");
     output = fopen("poptrie-lookup-table.txt", "wr");
-    while(read_ip_port(input, &ip, &mask))
+
+    printf("lookup the poptrie ip trie...\n");
+    gettimeofday(&tv1, NULL);
+    for(int i = 0; i < num; i++)
     {
-        u32 p = poptrie_lookup(ip);
-        //u32 p = multi_trie_lookup(ip);
-        fprintf(output, IP_FMT" %u\n", HOST_IP_FMT_STR(ip), p);
+        u32 p = poptrie_lookup(all_ip[i]);
+        //fprintf(output, IP_FMT" %u\n", HOST_IP_FMT_STR(ip), p);
     }
-    fclose(input);
+    gettimeofday(&tv2, NULL);
+    printf("poptrie time per lookup: %.2lf ns.\n", (1000.0*(tv2.tv_sec*1000000+tv2.tv_usec-tv1.tv_sec*1000000-tv1.tv_usec))/num);
     fclose(output);
 
     //compare result
-    input = fopen("lookup-table.txt", "r");
-    output = fopen("poptrie-lookup-table.txt", "r");
-    char s1[50], s2[50];
-    u32 mask1, mask2;
-    while(fscanf(input, "%s%u", s1, &mask1) != EOF && fscanf(output, "%s%u", s2, &mask2) != EOF)
+    printf("\ncompare result...\n");
+    //input = fopen("lookup-table.txt", "r");
+    //output = fopen("poptrie-lookup-table.txt", "r");
+    u32 mask1, mask2, res = 0;
+    for(int i = 0; i < num; i++)
     {
+        mask1 = trie_lookup(all_ip[i]);
+        mask2 = poptrie_lookup(all_ip[i]);
         if(mask1 != mask2)
-            printf("ERROR: poptrie lookup wrong, expected: %s/%u, get: %s/%u\n", s1, mask1, s2, mask2);
+        {
+            res = 1;
+            printf("ERROR: poptrie lookup wrong, expected: "IP_FMT"/%u, get: "IP_FMT"/%u\n",
+                HOST_IP_FMT_STR(all_ip[i]), mask1, HOST_IP_FMT_STR(all_ip[i]), mask2);
+        }
     }
+    if(!res)
+        printf("poptrie lookup result is right!\n");
 
     return 0;
 }

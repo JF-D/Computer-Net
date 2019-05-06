@@ -4,7 +4,7 @@
 #include "types.h"
 
 #define MAX_KEY 16
-#define popcnt(x) __builtin_popcount((u16)x)
+#define popcnt(x) __builtin_popcount((u32)(x))
 
 struct poptrie_node {
     u16 leafvec;
