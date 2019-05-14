@@ -1,6 +1,7 @@
 #ifndef __MOSPF_DATABASE_H__
 #define __MOSPF_DATABASE_H__
 
+#include <time.h>
 #include "base.h"
 #include "list.h"
 
@@ -13,6 +14,7 @@ typedef struct {
 	u32	rid;
 	u16	seq;
 	int nadv;
+	time_t upd;
 	struct mospf_lsa *array;
 } mospf_db_entry_t;
 
