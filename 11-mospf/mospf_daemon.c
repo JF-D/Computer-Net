@@ -1,4 +1,5 @@
 #include <time.h>
+#include "packet.h"
 #include "mospf_daemon.h"
 #include "mospf_proto.h"
 #include "mospf_nbr.h"
@@ -73,17 +74,17 @@ void *sending_mospf_hello_thread(void *param)
 			memcpy(eth->ether_dhost, dhost, ETH_ALEN);
 			eth->ether_type = htons(ETH_P_IP);
 			
-			struct iphdr *iph = packet_to_ip_hdr(packet);
-			ip_init_hdr(iph, iface->ip, MOSPF_ALLSPFRouters, len - ETHER_HDR_SIZE, 90);
-
-			struct mospf_hdr *mhdr = (struct mospf_hdr*)(packet + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE);
-			mospf_init_hdr(mhdr, 1, MOSPF_HDR_SIZE + MOSPF_HELLO_SIZE, instance->router_id, 0);
-
 			struct mospf_hello *hello = (struct mospf_hello*)(packet + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + MOSPF_HDR_SIZE);
 			mospf_init_hello(hello, iface->mask);
 
+			struct mospf_hdr *mhdr = (struct mospf_hdr*)(packet + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE);
+			mospf_init_hdr(mhdr, 1, MOSPF_HDR_SIZE + MOSPF_HELLO_SIZE, instance->router_id, 0);
 			mhdr->checksum = mospf_checksum(mhdr);
 
+			struct iphdr *iph = packet_to_ip_hdr(packet);
+			ip_init_hdr(iph, iface->ip, MOSPF_ALLSPFRouters, len - ETHER_HDR_SIZE, 90);
+
+			//printf("rid:"IP_FMT" IP:"IP_FMT" mask:"IP_FMT"\n", HOST_IP_FMT_STR(instance->router_id), HOST_IP_FMT_STR(iface->ip), HOST_IP_FMT_STR(iface->mask));
 			iface_send_packet(iface, packet, len);
 		}
 		pthread_mutex_unlock(&mospf_lock);
@@ -141,6 +142,15 @@ void *checking_database_thread(void *param)
 				free(db_entry);
 			}
 		}
+
+		printf("\n\nmospf database:\n");
+		list_for_each_entry_safe(db_entry, p, &mospf_db, list)
+		{
+			for(int i = 0; i < db_entry->nadv; i++)
+				printf("rid:"IP_FMT" subnet:"IP_FMT" mask:"IP_FMT" nbr:"IP_FMT"\n", HOST_IP_FMT_STR(db_entry->rid), \
+					HOST_IP_FMT_STR(db_entry->array[i].subnet), HOST_IP_FMT_STR(db_entry->array[i].mask), \
+					HOST_IP_FMT_STR(db_entry->array[i].rid));
+		}
 		pthread_mutex_unlock(&mospf_lock);
 	}
 
@@ -156,9 +166,11 @@ void handle_mospf_hello(iface_info_t *iface, const char *packet, int len)
 	struct mospf_hello *hello = (struct mospf_hello*)(packet + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + MOSPF_HDR_SIZE);
 
 	int find = 0;
+	//printf("iface:"IP_FMT"\n", HOST_IP_FMT_STR(iface->ip));
 	mospf_nbr_t *nbr;
 	list_for_each_entry(nbr, &iface->nbr_list, list)
 	{
+		//printf("nbr-- rid:"IP_FMT" IP:"IP_FMT" mask:"IP_FMT"\n", HOST_IP_FMT_STR(nbr->nbr_id), HOST_IP_FMT_STR(nbr->nbr_ip), HOST_IP_FMT_STR(nbr->nbr_mask));
 		if(nbr->nbr_ip == ntohl(iph->saddr))
 		{
 			nbr->alive = 0;
@@ -174,6 +186,7 @@ void handle_mospf_hello(iface_info_t *iface, const char *packet, int len)
 		nbr->nbr_ip = ntohl(iph->saddr);
 		nbr->nbr_mask = ntohl(hello->mask);
 		nbr->alive = 0;
+		//printf("nbr-- rid:"IP_FMT" IP:"IP_FMT" mask:"IP_FMT"\n", HOST_IP_FMT_STR(nbr->nbr_id), HOST_IP_FMT_STR(nbr->nbr_ip), HOST_IP_FMT_STR(nbr->nbr_mask));
 		list_add_tail(&nbr->list, &iface->nbr_list);
 		iface->num_nbr ++;
 	}
@@ -211,8 +224,8 @@ void *sending_mospf_lsu_thread(void *param)
 				if(iface->num_nbr == 0)
 				{
 					lsa[i].rid = htonl(0);
-					lsa[i].subnet = htonl(0);
-					lsa[i].mask = htonl(0);
+					lsa[i].subnet = htonl(iface->ip & iface->mask);
+					lsa[i].mask = htonl(iface->mask);
 					++i;
 					continue;
 				}
@@ -220,7 +233,7 @@ void *sending_mospf_lsu_thread(void *param)
 				list_for_each_entry(nbr, &iface->nbr_list, list)
 				{
 					lsa[i].rid = htonl(nbr->nbr_id);
-					lsa[i].subnet = htonl(nbr->nbr_ip);
+					lsa[i].subnet = htonl(nbr->nbr_ip & nbr->nbr_mask);
 					lsa[i].mask = htonl(nbr->nbr_mask);
 					++i;
 				}
@@ -241,6 +254,7 @@ void *sending_mospf_lsu_thread(void *param)
 					ip_init_hdr(iph, iface->ip, nbr->nbr_ip, len-ETH_ALEN, 90);
 					struct ether_header *eth = (struct ether_header *)pkt;
 					memcpy(eth->ether_shost, iface->mac, ETH_ALEN);
+					eth->ether_type = htons(ETH_P_IP);
 					ip_send_packet(pkt, len);
 				}
 			}
@@ -260,6 +274,9 @@ void handle_mospf_lsu(iface_info_t *iface, char *packet, int len)
 	struct mospf_hdr *hdr = (struct mospf_hdr*)(packet + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE);
 	struct mospf_lsu *lsu = (struct mospf_lsu*)((char *)hdr + MOSPF_HDR_SIZE);
 	struct mospf_lsa *lsa = (struct mospf_lsa*)((char *)lsu + MOSPF_LSU_SIZE);
+
+	if(ntohl(hdr->rid) == instance->router_id)
+		return ;
 	
 	int received = 0, nadv = ntohl(lsu->nadv);
 	
