@@ -279,7 +279,7 @@ iface_info_t *fwd_iface[10];
 //return: number of nodes
 int build_graph()
 {
-	int n = 0;
+	int n = 1;
 	
 	mospf_db_entry_t *db_entry;
 	list_for_each_entry(db_entry, &mospf_db, list)
@@ -320,6 +320,7 @@ int build_graph()
 			if(db_entry->array[i].rid == instance->router_id)
 			{
 				G[0][x] = G[x][0] = 1;
+				pre[x] = 0;
 				continue;
 			}
 
@@ -354,7 +355,6 @@ void spf(int n)
 				v = i;
 			}
 		}
-
 		vis[v] = 1;
 
 		for(int i = 1; i < n; i++)
@@ -372,7 +372,7 @@ void *spf_thread(void *param)
 {
 	while(1)
 	{
-		sleep(1);
+		sleep(MOSPF_DATABASE_TIMEOUT);
 		pthread_mutex_lock(&mospf_lock);
 		memset(G, 0, sizeof(G));
 		memset(d, 0x7f, sizeof(d));
@@ -443,32 +443,6 @@ void *spf_thread(void *param)
 							gate_way[k], fwd_iface[k]);
 						add_rt_entry(rt_entry);
 					}
-
-					/*int y = 1;
-					mospf_db_entry_t *db_entry_p;
-					list_for_each_entry(db_entry_p, &mospf_db, list)
-					{
-						if(db_entry_p->rid == db_entry->array[i].rid)
-						{
-							rt_entry_t *rt_entry = longest_prefix_match(db_entry->array[i].subnet);
-							if(rt_entry == NULL)
-							{
-								rt_entry = new_rt_entry(db_entry->array[i].subnet, db_entry->array[i].mask, \
-									gate_way[k], fwd_iface[k]);
-								add_rt_entry(rt_entry);
-							}
-							else if(rt_entry->mask < db_entry->array[i].mask)
-							{
-								remove_rt_entry(rt_entry);
-								rt_entry = new_rt_entry(db_entry->array[i].subnet, db_entry->array[i].mask, \
-									gate_way[k], fwd_iface[k]);
-								add_rt_entry(rt_entry);
-							}
-							break;
-						}
-						else
-							y++;
-					}*/
 				}
 			}
 		}
@@ -485,8 +459,6 @@ void *spf_thread(void *param)
 
 		pthread_mutex_unlock(&mospf_lock);
 	}
-	
-
 }
 
 void handle_mospf_lsu(iface_info_t *iface, char *packet, int len)
