@@ -1,5 +1,6 @@
 #include <time.h>
 #include "packet.h"
+#include "rtable.h"
 #include "mospf_daemon.h"
 #include "mospf_proto.h"
 #include "mospf_nbr.h"
@@ -44,14 +45,16 @@ void *sending_mospf_hello_thread(void *param);
 void *sending_mospf_lsu_thread(void *param);
 void *checking_nbr_thread(void *param);
 void *checking_database_thread(void *param);
+void *spf_thread(void *param);
 
 void mospf_run()
 {
-	pthread_t hello, lsu, nbr, db;
+	pthread_t hello, lsu, nbr, db, spf;
 	pthread_create(&hello, NULL, sending_mospf_hello_thread, NULL);
 	pthread_create(&lsu, NULL, sending_mospf_lsu_thread, NULL);
 	pthread_create(&nbr, NULL, checking_nbr_thread, NULL);
 	pthread_create(&db, NULL, checking_database_thread, NULL);
+	pthread_create(&spf, NULL, spf_thread, NULL);
 }
 
 void *sending_mospf_hello_thread(void *param)
@@ -266,6 +269,224 @@ void *sending_mospf_lsu_thread(void *param)
 	}
 
 	return NULL;
+}
+
+int G[10][10];
+int d[10], pre[10], vis[10];
+u32 gate_way[10];
+iface_info_t *fwd_iface[10];
+
+//return: number of nodes
+int build_graph()
+{
+	int n = 0;
+	
+	mospf_db_entry_t *db_entry;
+	list_for_each_entry(db_entry, &mospf_db, list)
+		n++;
+	
+	d[0] = 0;
+	iface_info_t *iface;
+	list_for_each_entry(iface, &instance->iface_list, list)
+	{
+		mospf_nbr_t *nbr;
+		list_for_each_entry(nbr, &iface->nbr_list, list)
+		{
+			int k = 1;
+			list_for_each_entry(db_entry, &mospf_db, list)
+			{
+				if(db_entry->rid == nbr->nbr_id)
+				{
+					G[0][k] = G[k][0] = 1;
+					d[k] = 1;
+					gate_way[k] = nbr->nbr_ip;
+					fwd_iface[k] = iface;
+					break;
+				}
+				else
+					k++;
+			}
+		}
+	}
+	
+	int x = 1;
+	list_for_each_entry(db_entry, &mospf_db, list)
+	{
+		for(int i = 0; i < db_entry->nadv; i++)
+		{
+			if(db_entry->array[i].rid == 0)
+				continue;
+			
+			if(db_entry->array[i].rid == instance->router_id)
+			{
+				G[0][x] = G[x][0] = 1;
+				continue;
+			}
+
+			int k = 1;
+			mospf_db_entry_t *db_entry_p;
+			list_for_each_entry(db_entry_p, &mospf_db, list)
+			{
+				if(db_entry_p->rid == db_entry->array[i].rid)
+					G[x][k] = G[k][x] = 1;
+				else
+					k++;
+			}
+		}
+
+		x++;
+	}
+
+	return n;
+}
+
+void spf(int n)
+{
+	int t = n;
+	while(--t)
+	{
+		int v = 1, dis = 0x7f7f7f7f;
+		for(int i = 1; i < n; i++)
+		{
+			if(d[i] < dis && !vis[i])
+			{
+				dis = d[i];
+				v = i;
+			}
+		}
+
+		vis[v] = 1;
+
+		for(int i = 1; i < n; i++)
+		{
+			if(!vis[i] && G[v][i] > 0 && d[v] + G[v][i] < d[i])
+			{
+				d[i] = d[v] + G[v][i];
+				pre[i] = v;
+			}
+		}
+	}
+}
+
+void *spf_thread(void *param)
+{
+	while(1)
+	{
+		sleep(1);
+		pthread_mutex_lock(&mospf_lock);
+		memset(G, 0, sizeof(G));
+		memset(d, 0x7f, sizeof(d));
+		memset(vis, 0, sizeof(vis));
+		memset(pre, 0xff, sizeof(pre));
+		memset(gate_way, 0, sizeof(gate_way));
+		memset(fwd_iface, 0, sizeof(fwd_iface));
+
+		int n = build_graph();
+		spf(n);
+
+		int t = n;
+		memset(vis, 0, sizeof(vis));
+		while(--t)
+		{
+			int v = 1, dis = 0x7f7f7f7f;
+			for(int i = 1; i < n; i++)
+			{
+				if(d[i] < dis && !vis[i])
+				{
+					dis = d[i];
+					v = i;
+				}
+			}
+			vis[v] = 1;
+
+			int k = 1;
+			mospf_db_entry_t *db_entry;
+			list_for_each_entry(db_entry, &mospf_db, list)
+			{
+				if(k != v)
+				{
+					k++;
+					continue;
+				}
+
+				while(pre[k] != 0)
+					k = pre[k];
+
+				for(int i = 0; i < db_entry->nadv; i++)
+				{
+					if(db_entry->array[i].rid == 0)
+					{
+						rt_entry_t *rt_entry = longest_prefix_match(db_entry->array[i].subnet);
+						if(rt_entry != NULL)
+							remove_rt_entry(rt_entry);
+						
+						rt_entry = new_rt_entry(db_entry->array[i].subnet, db_entry->array[i].mask, \
+							gate_way[k], fwd_iface[k]);
+						add_rt_entry(rt_entry);
+						continue;
+					}
+
+					if(db_entry->array[i].rid == instance->router_id)
+						continue;
+					
+					rt_entry_t *rt_entry = longest_prefix_match(db_entry->array[i].subnet);
+					if(rt_entry == NULL)
+					{
+						rt_entry = new_rt_entry(db_entry->array[i].subnet, db_entry->array[i].mask, \
+							gate_way[k], fwd_iface[k]);
+						add_rt_entry(rt_entry);
+					}
+					else if(rt_entry->mask < db_entry->array[i].mask)
+					{
+						remove_rt_entry(rt_entry);
+						rt_entry = new_rt_entry(db_entry->array[i].subnet, db_entry->array[i].mask, \
+							gate_way[k], fwd_iface[k]);
+						add_rt_entry(rt_entry);
+					}
+
+					/*int y = 1;
+					mospf_db_entry_t *db_entry_p;
+					list_for_each_entry(db_entry_p, &mospf_db, list)
+					{
+						if(db_entry_p->rid == db_entry->array[i].rid)
+						{
+							rt_entry_t *rt_entry = longest_prefix_match(db_entry->array[i].subnet);
+							if(rt_entry == NULL)
+							{
+								rt_entry = new_rt_entry(db_entry->array[i].subnet, db_entry->array[i].mask, \
+									gate_way[k], fwd_iface[k]);
+								add_rt_entry(rt_entry);
+							}
+							else if(rt_entry->mask < db_entry->array[i].mask)
+							{
+								remove_rt_entry(rt_entry);
+								rt_entry = new_rt_entry(db_entry->array[i].subnet, db_entry->array[i].mask, \
+									gate_way[k], fwd_iface[k]);
+								add_rt_entry(rt_entry);
+							}
+							break;
+						}
+						else
+							y++;
+					}*/
+				}
+			}
+		}
+
+		//print rtable
+		printf("\n\nrtable:\n");
+		rt_entry_t *rt_entry;
+		printf("dest\tmask\tgw\n");
+		list_for_each_entry(rt_entry, &rtable, list)
+		{
+			printf(IP_FMT"\t"IP_FMT"\t"IP_FMT"\n", HOST_IP_FMT_STR(rt_entry->dest), \
+				HOST_IP_FMT_STR(rt_entry->mask), HOST_IP_FMT_STR(rt_entry->gw));
+		}
+
+		pthread_mutex_unlock(&mospf_lock);
+	}
+	
+
 }
 
 void handle_mospf_lsu(iface_info_t *iface, char *packet, int len)
