@@ -416,13 +416,12 @@ void *spf_thread(void *param)
 				{
 					if(db_entry->array[i].rid == 0)
 					{
-						rt_entry_t *rt_entry = longest_prefix_match(db_entry->array[i].subnet);
-						if(rt_entry != NULL)
-							remove_rt_entry(rt_entry);
-						
-						rt_entry = new_rt_entry(db_entry->array[i].subnet, db_entry->array[i].mask, \
+						rt_entry_t *rt_entry_old = longest_prefix_match(db_entry->array[i].subnet);
+						rt_entry_t *rt_entry = new_rt_entry(db_entry->array[i].subnet, db_entry->array[i].mask, \
 							gate_way[k], fwd_iface[k]);
 						add_rt_entry(rt_entry);
+						if(rt_entry_old != NULL)
+							remove_rt_entry(rt_entry_old);
 						continue;
 					}
 
@@ -438,10 +437,11 @@ void *spf_thread(void *param)
 					}
 					else if(rt_entry->mask < db_entry->array[i].mask)
 					{
-						remove_rt_entry(rt_entry);
+						rt_entry_t *rt_entry_old = rt_entry;
 						rt_entry = new_rt_entry(db_entry->array[i].subnet, db_entry->array[i].mask, \
 							gate_way[k], fwd_iface[k]);
 						add_rt_entry(rt_entry);
+						remove_rt_entry(rt_entry_old);
 					}
 				}
 			}
