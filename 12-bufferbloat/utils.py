@@ -60,6 +60,7 @@ def start_iperf(net, duration):
     print 'Start iperf ...'
     server = h2.popen('iperf -s -w 16m')
     client = h1.popen('iperf -c %s -t %d' % (h2.IP(), duration+ 5))
+    client = h1.popen('iperf -u -c %s -b 100M > out.txt' % (h2.IP()), shell=True)
 
 def stop_iperf():
     print 'Kill iperf ...'
