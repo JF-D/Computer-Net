@@ -65,7 +65,7 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 			tcp_set_state(tsk, TCP_CLOSED);
 			break;
 		default:
-			break;
+			tcp_send_reset(tsk);
 		}
 	}
 
@@ -107,6 +107,11 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 			tcp_send_control_packet(child_sock, TCP_SYN | TCP_ACK);
 			tcp_hash(child_sock);
 		}
+		else
+		{
+			tcp_send_reset(tsk);
+		}
+		
 	} 
 	else if(cb->flags & TCP_FIN)
 	{
@@ -124,7 +129,7 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 			break;
 
 		default:
-			break;
+			tcp_send_reset(tsk);
 		}
 	}
 }
