@@ -33,6 +33,7 @@ static inline void tcp_update_window_safe(struct tcp_sock *tsk, struct tcp_cb *c
 static inline int is_tcp_seq_valid(struct tcp_sock *tsk, struct tcp_cb *cb)
 {
 	u32 rcv_end = tsk->rcv_nxt + max(tsk->rcv_wnd, 1);
+	printf("seq:%d, end:%d, nxt:%d, seqend:%d\n", cb->seq, rcv_end, tsk->rcv_nxt, cb->seq_end);
 	if (less_than_32b(cb->seq, rcv_end) && less_or_equal_32b(tsk->rcv_nxt, cb->seq_end)) {
 		return 1;
 	}
@@ -45,5 +46,85 @@ static inline int is_tcp_seq_valid(struct tcp_sock *tsk, struct tcp_cb *cb)
 // Process the incoming packet according to TCP state machine. 
 void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 {
-	fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
+	//fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
+	
+	if(cb->flags & TCP_ACK)
+	{
+		tsk->rcv_nxt = cb->seq_end;
+		switch(tsk->state)
+		{
+		case TCP_SYN_RECV:
+			tcp_set_state(tsk, TCP_ESTABLISHED);
+			tcp_sock_accept_enqueue(tsk);
+			wake_up(tsk->parent->wait_accept);
+			break;
+		case TCP_FIN_WAIT_1:
+			tcp_set_state(tsk, TCP_FIN_WAIT_2);
+			break;
+		case TCP_LAST_ACK:
+			tcp_set_state(tsk, TCP_CLOSED);
+			break;
+		default:
+			break;
+		}
+	}
+
+	if(cb->flags & TCP_RST)
+	{
+		//RST: reset the tcp sock
+		tcp_sock_close(tsk);
+		return ;
+	}
+	else if(cb->flags & TCP_SYN)
+	{
+		//SYN & ACK: 
+		if((cb->flags & TCP_ACK) && tsk->state == TCP_SYN_SENT)
+		{
+			wake_up(tsk->wait_connect);
+			tcp_send_control_packet(tsk, TCP_ACK);
+			tcp_set_state(tsk, TCP_ESTABLISHED);
+		}
+		else if(tsk->state == TCP_LISTEN) //SYN: 
+		{
+			struct tcp_sock *child_sock = alloc_tcp_sock();
+			child_sock->local.ip = cb->daddr;
+			child_sock->local.port = cb->dport;
+			child_sock->peer.ip = cb->saddr;
+			child_sock->peer.port = cb->sport;
+			child_sock->parent = tsk;
+			child_sock->iss = tcp_new_iss();
+			child_sock->snd_una = child_sock->iss;
+			child_sock->snd_nxt = child_sock->iss;
+			child_sock->rcv_nxt = cb->seq_end;
+
+			struct sock_addr addr;
+			addr.ip = htonl(child_sock->local.ip);
+			addr.port = htons(child_sock->local.port);
+			tcp_sock_bind(child_sock, &addr);
+			
+			tcp_set_state(child_sock, TCP_SYN_RECV);
+			tcp_sock_listen_enqueue(child_sock);
+			tcp_send_control_packet(child_sock, TCP_SYN | TCP_ACK);
+			tcp_hash(child_sock);
+		}
+	} 
+	else if(cb->flags & TCP_FIN)
+	{
+		switch (tsk->state)
+		{
+		case TCP_ESTABLISHED:
+			tcp_send_control_packet(tsk, TCP_ACK);
+			tcp_set_state(tsk, TCP_CLOSE_WAIT);
+			break;
+		
+		case TCP_FIN_WAIT_2:
+			tcp_send_control_packet(tsk, TCP_ACK);
+			tcp_set_state(tsk, TCP_TIME_WAIT);
+			tcp_set_timewait_timer(tsk);
+			break;
+
+		default:
+			break;
+		}
+	}
 }
