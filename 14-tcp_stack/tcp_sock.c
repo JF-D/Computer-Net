@@ -353,7 +353,7 @@ struct tcp_sock *tcp_sock_accept(struct tcp_sock *tsk)
 			return NULL;
 	}
 	struct tcp_sock *acc_sock = tcp_sock_accept_dequeue(tsk);
-	tcp_set_state(acc_sock, TCP_SYN_RECV);
+	tcp_set_state(acc_sock, TCP_ESTABLISHED);
 
 	return acc_sock;
 }
