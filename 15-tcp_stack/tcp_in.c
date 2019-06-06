@@ -51,8 +51,24 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 	if(cb->flags & TCP_ACK)
 	{
 		tsk->rcv_nxt = cb->seq_end;
+		tsk->snd_una = cb->ack;
 		switch(tsk->state)
 		{
+		case TCP_ESTABLISHED:
+			if(tsk->parent != NULL)
+			{
+				pthread_mutex_lock(&rcv_buf_lock);
+				write_ring_buffer(tsk->rcv_buf, cb->payload, cb->pl_len);
+				pthread_mutex_unlock(&rcv_buf_lock);
+				tsk->rcv_wnd -= cb->pl_len;
+				wake_up(tsk->parent->wait_recv);
+				tcp_send_control_packet(tsk, TCP_ACK);
+			}
+			else
+			{
+				tcp_update_window(tsk, cb);
+			}
+			break;
 		case TCP_SYN_RECV:
 			tcp_set_state(tsk, TCP_ESTABLISHED);
 			tcp_sock_accept_enqueue(tsk);
@@ -96,11 +112,6 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 			child_sock->snd_una = child_sock->iss;
 			child_sock->snd_nxt = child_sock->iss;
 			child_sock->rcv_nxt = cb->seq_end;
-
-			struct sock_addr addr;
-			addr.ip = htonl(child_sock->local.ip);
-			addr.port = htons(child_sock->local.port);
-			tcp_sock_bind(child_sock, &addr);
 			
 			tcp_set_state(child_sock, TCP_SYN_RECV);
 			tcp_sock_listen_enqueue(child_sock);

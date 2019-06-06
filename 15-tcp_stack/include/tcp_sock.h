@@ -146,6 +146,7 @@ int tcp_sock_connect(struct tcp_sock *tsk, struct sock_addr *skaddr);
 struct tcp_sock *tcp_sock_accept(struct tcp_sock *tsk);
 void tcp_sock_close(struct tcp_sock *tsk);
 
+pthread_mutex_t rcv_buf_lock;
 int tcp_sock_read(struct tcp_sock *tsk, char *buf, int len);
 int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len);
 

@@ -57,6 +57,7 @@ struct tcp_sock *alloc_tcp_sock()
 	init_list_head(&tsk->accept_queue);
 
 	tsk->rcv_buf = alloc_ring_buffer(tsk->rcv_wnd);
+	pthread_mutex_init(&rcv_buf_lock, NULL);
 
 	tsk->wait_connect = alloc_wait_struct();
 	tsk->wait_accept = alloc_wait_struct();
@@ -353,7 +354,8 @@ struct tcp_sock *tcp_sock_accept(struct tcp_sock *tsk)
 			return NULL;
 	}
 	struct tcp_sock *acc_sock = tcp_sock_accept_dequeue(tsk);
-	tcp_set_state(acc_sock, TCP_ESTABLISHED);
+	if(acc_sock->state != TCP_ESTABLISHED)
+		tcp_set_state(acc_sock, TCP_ESTABLISHED);
 
 	return acc_sock;
 }
@@ -375,4 +377,37 @@ void tcp_sock_close(struct tcp_sock *tsk)
 		default:
 			break;
 	}
+}
+
+int tcp_sock_read(struct tcp_sock *tsk, char *buf, int len)
+{
+	while(ring_buffer_empty(tsk->rcv_buf))
+	{
+		sleep_on(tsk->wait_recv);
+	}
+	pthread_mutex_lock(&rcv_buf_lock);
+	int rlen = read_ring_buffer(tsk->rcv_buf, buf, len);
+	pthread_mutex_unlock(&rcv_buf_lock);
+	tsk->rcv_wnd += rlen;
+	return rlen;
+}
+
+int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len)
+{
+	int pt = 0;
+	while(len)
+	{
+		int data_len = min(len, 1514 - ETHER_HDR_SIZE - IP_BASE_HDR_SIZE - TCP_BASE_HDR_SIZE);
+		int pkt_len  = data_len + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE;
+		while(tsk->rcv_wnd < data_len)
+		{
+			sleep_on(tsk->wait_send);
+		}
+		char *packet = malloc(pkt_len);
+		memcpy(packet + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE, buf + pt, data_len);
+		tcp_send_packet(tsk, packet, pkt_len);
+		pt += data_len;
+		len -= data_len;
+	}
+	return len;
 }
