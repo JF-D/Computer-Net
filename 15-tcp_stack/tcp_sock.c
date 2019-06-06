@@ -387,8 +387,8 @@ int tcp_sock_read(struct tcp_sock *tsk, char *buf, int len)
 	}
 	pthread_mutex_lock(&rcv_buf_lock);
 	int rlen = read_ring_buffer(tsk->rcv_buf, buf, len);
-	pthread_mutex_unlock(&rcv_buf_lock);
 	tsk->rcv_wnd += rlen;
+	pthread_mutex_unlock(&rcv_buf_lock);
 	return rlen;
 }
 

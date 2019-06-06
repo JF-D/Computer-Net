@@ -51,17 +51,16 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 	if(cb->flags & TCP_ACK)
 	{
 		tsk->rcv_nxt = cb->seq_end;
-		tsk->snd_una = cb->ack;
 		switch(tsk->state)
 		{
 		case TCP_ESTABLISHED:
-			if(tsk->parent != NULL)
+			if(cb->pl_len > 0)
 			{
 				pthread_mutex_lock(&rcv_buf_lock);
 				write_ring_buffer(tsk->rcv_buf, cb->payload, cb->pl_len);
-				pthread_mutex_unlock(&rcv_buf_lock);
 				tsk->rcv_wnd -= cb->pl_len;
-				wake_up(tsk->parent->wait_recv);
+				pthread_mutex_unlock(&rcv_buf_lock);
+				wake_up(tsk->wait_recv);
 				tcp_send_control_packet(tsk, TCP_ACK);
 			}
 			else
