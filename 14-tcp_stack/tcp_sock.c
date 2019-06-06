@@ -349,11 +349,11 @@ struct tcp_sock *tcp_sock_accept(struct tcp_sock *tsk)
 	//fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
 	if(!tsk->accept_backlog)
 	{
-		if(sleep_on(tsk->wait_accept) < 0)
-			return NULL;
+		sleep_on(tsk->wait_accept);
 	}
 	struct tcp_sock *acc_sock = tcp_sock_accept_dequeue(tsk);
-	tcp_set_state(acc_sock, TCP_ESTABLISHED);
+	if(acc_sock->state != TCP_ESTABLISHED)
+		tcp_set_state(acc_sock, TCP_ESTABLISHED);
 
 	return acc_sock;
 }

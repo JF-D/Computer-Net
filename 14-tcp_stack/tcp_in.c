@@ -96,11 +96,6 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 			child_sock->snd_una = child_sock->iss;
 			child_sock->snd_nxt = child_sock->iss;
 			child_sock->rcv_nxt = cb->seq_end;
-
-			struct sock_addr addr;
-			addr.ip = htonl(child_sock->local.ip);
-			addr.port = htons(child_sock->local.port);
-			tcp_sock_bind(child_sock, &addr);
 			
 			tcp_set_state(child_sock, TCP_SYN_RECV);
 			tcp_sock_listen_enqueue(child_sock);
