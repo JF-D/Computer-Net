@@ -65,7 +65,8 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 			}
 			else
 			{
-				tcp_update_window(tsk, cb);
+				tsk->snd_wnd = cb->rwnd;
+				wake_up(tsk->wait_send);
 			}
 			break;
 		case TCP_SYN_RECV:

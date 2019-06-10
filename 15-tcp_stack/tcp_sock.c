@@ -51,6 +51,7 @@ struct tcp_sock *alloc_tcp_sock()
 
 	tsk->state = TCP_CLOSED;
 	tsk->rcv_wnd = TCP_DEFAULT_WINDOW;
+	tsk->snd_wnd = TCP_DEFAULT_WINDOW;
 
 	init_list_head(&tsk->list);
 	init_list_head(&tsk->listen_queue);
@@ -401,7 +402,7 @@ int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len)
 	{
 		int data_len = min(len, 1514 - ETHER_HDR_SIZE - IP_BASE_HDR_SIZE - TCP_BASE_HDR_SIZE);
 		int pkt_len  = data_len + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE;
-		while(tsk->rcv_wnd < data_len)
+		while(tsk->snd_wnd < data_len)
 		{
 			sleep_on(tsk->wait_send);
 		}
@@ -411,5 +412,6 @@ int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len)
 		pt += data_len;
 		len -= data_len;
 	}
+
 	return len;
 }
