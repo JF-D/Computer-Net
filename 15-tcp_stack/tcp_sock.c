@@ -383,6 +383,8 @@ int tcp_sock_read(struct tcp_sock *tsk, char *buf, int len)
 {
 	while(ring_buffer_empty(tsk->rcv_buf))
 	{
+		if(tsk->state == TCP_CLOSE_WAIT)
+			break;
 		sleep_on(tsk->wait_recv);
 	}
 	pthread_mutex_lock(&rcv_buf_lock);

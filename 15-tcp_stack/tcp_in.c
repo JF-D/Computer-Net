@@ -126,6 +126,7 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 		case TCP_ESTABLISHED:
 			tcp_send_control_packet(tsk, TCP_ACK);
 			tcp_set_state(tsk, TCP_CLOSE_WAIT);
+			wake_up(tsk->wait_recv);
 			break;
 		
 		case TCP_FIN_WAIT_2:
