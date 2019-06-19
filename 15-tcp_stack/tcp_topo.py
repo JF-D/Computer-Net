@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+from mininet.node import OVSBridge
 from mininet.topo import Topo
 from mininet.net import Mininet
 from mininet.link import TCLink
@@ -9,12 +10,15 @@ class TCPTopo(Topo):
     def build(self):
         h1 = self.addHost('h1')
         h2 = self.addHost('h2')
+        s1 = self.addSwitch('s1')
 
-        self.addLink(h1, h2, delay='10ms')
+        #self.addLink(h1, h2, delay='10ms')
+        self.addLink(h1, s1, delay='5ms')
+        self.addLink(s1, h2, delay='5ms')
 
 if __name__ == '__main__':
     topo = TCPTopo()
-    net = Mininet(topo = topo, link = TCLink, controller = None) 
+    net = Mininet(topo = topo, switch = OVSBridge, link = TCLink, controller = None) 
 
     h1, h2 = net.get('h1', 'h2')
     h1.cmd('ifconfig h1-eth0 10.0.0.1/24')

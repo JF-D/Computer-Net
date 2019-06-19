@@ -77,11 +77,14 @@ void *tcp_client(void *arg)
 
 	struct tcp_sock *tsk = alloc_tcp_sock();
 
+	sleep(1);
+
 	if (tcp_sock_connect(tsk, skaddr) < 0) {
 		log(ERROR, "tcp_sock connect to server ("IP_FMT":%hu)failed.", \
 				NET_IP_FMT_STR(skaddr->ip), ntohs(skaddr->port));
 		exit(1);
 	}
+	printf("connect!\n");
 
     char wbuf[10050];
     FILE *fd = fopen("client-input.dat", "rb");

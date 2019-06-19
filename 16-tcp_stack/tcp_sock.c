@@ -59,11 +59,18 @@ struct tcp_sock *alloc_tcp_sock()
 
 	tsk->rcv_buf = alloc_ring_buffer(tsk->rcv_wnd);
 	pthread_mutex_init(&rcv_buf_lock, NULL);
+	pthread_mutex_init(&send_buf_lock, NULL);
+	pthread_mutex_init(&rcv_ofo_buf_lock, NULL);
 
 	tsk->wait_connect = alloc_wait_struct();
 	tsk->wait_accept = alloc_wait_struct();
 	tsk->wait_recv = alloc_wait_struct();
 	tsk->wait_send = alloc_wait_struct();
+
+	init_list_head(&tsk->send_buf.list);
+	init_list_head(&tsk->rcv_ofo_buf.list);
+	init_list_head(&tsk->timewait.list);
+	init_list_head(&tsk->retrans_timer.list);
 
 	return tsk;
 }
@@ -87,6 +94,24 @@ void free_tcp_sock(struct tcp_sock *tsk)
 
 		free(tsk);
 	}
+}
+
+struct tbd_data_block *new_tbd_data_block(u8 flags, u32 seq, u32 len, char *buf)
+{
+	struct tbd_data_block *dblk = (struct tbd_data_block*)malloc(sizeof(struct tbd_data_block));
+	init_list_head(&dblk->list);
+	dblk->flags = flags;
+	dblk->times = 0;
+	dblk->seq   = seq;
+	dblk->len   = len;
+	dblk->packet = NULL;
+	if(len > 0)
+	{
+		dblk->packet = malloc(len);
+		memcpy(dblk->packet, buf, len);
+	}
+	dblk->seq_end = seq + len + ((flags & (TCP_SYN|TCP_FIN)) ? 1 : 0);
+	return dblk;
 }
 
 // lookup tcp sock in established_table with key (saddr, daddr, sport, dport)
@@ -277,9 +302,17 @@ int tcp_sock_connect(struct tcp_sock *tsk, struct sock_addr *skaddr)
 	tsk->snd_nxt = tsk->iss;
 	tcp_send_control_packet(tsk, TCP_SYN);
 	tcp_set_state(tsk, TCP_SYN_SENT);
+	struct tbd_data_block *dblk = new_tbd_data_block(TCP_SYN, tsk->snd_nxt, 0, NULL);
+	pthread_mutex_lock(&send_buf_lock);
+	list_add_tail(&dblk->list, &tsk->send_buf.list);
+	pthread_mutex_unlock(&send_buf_lock);
+	if(!tsk->retrans_timer.enable)
+		tcp_set_retrans_timer(tsk);
 	tcp_hash(tsk);
 	if(sleep_on(tsk->wait_connect) >= 0)
+	{
 		return 0;
+	}
 	return -1;
 }
 
@@ -366,14 +399,27 @@ struct tcp_sock *tcp_sock_accept(struct tcp_sock *tsk)
 void tcp_sock_close(struct tcp_sock *tsk)
 {
 	//fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
+	struct tbd_data_block *dblk;
 	switch(tsk->state)
 	{
 		case TCP_ESTABLISHED:
 			tcp_send_control_packet(tsk, TCP_FIN | TCP_ACK);
+			dblk = new_tbd_data_block(TCP_FIN | TCP_ACK, tsk->snd_nxt, 0, NULL);
+			pthread_mutex_lock(&send_buf_lock);
+			list_add_tail(&dblk->list, &tsk->send_buf.list);
+			pthread_mutex_unlock(&send_buf_lock);
+			if(!tsk->retrans_timer.enable)
+				tcp_set_retrans_timer(tsk);
 			tcp_set_state(tsk, TCP_FIN_WAIT_1);
 			break;
 		case TCP_CLOSE_WAIT:
 			tcp_send_control_packet(tsk, TCP_FIN | TCP_ACK);
+			dblk = new_tbd_data_block(TCP_FIN | TCP_ACK, tsk->snd_nxt, 0, NULL);
+			pthread_mutex_lock(&send_buf_lock);
+			list_add_tail(&dblk->list, &tsk->send_buf.list);
+			pthread_mutex_unlock(&send_buf_lock);
+			if(!tsk->retrans_timer.enable)
+				tcp_set_retrans_timer(tsk);
 			tcp_set_state(tsk, TCP_LAST_ACK);
 		default:
 			break;
@@ -392,6 +438,7 @@ int tcp_sock_read(struct tcp_sock *tsk, char *buf, int len)
 	int rlen = read_ring_buffer(tsk->rcv_buf, buf, len);
 	tsk->rcv_wnd += rlen;
 	pthread_mutex_unlock(&rcv_buf_lock);
+	//wake_up(tsk->wait_send);
 	return rlen;
 }
 
@@ -407,8 +454,18 @@ int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len)
 			sleep_on(tsk->wait_send);
 		}
 		char *packet = malloc(pkt_len);
+		u32 seq = tsk->snd_nxt;
 		memcpy(packet + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE, buf + pt, data_len);
 		tcp_send_packet(tsk, packet, pkt_len);
+		
+		//wait to be ACK
+		struct tbd_data_block *dblk = new_tbd_data_block(TCP_ACK, seq, data_len, buf + pt);
+		pthread_mutex_lock(&send_buf_lock);
+		list_add_tail(&dblk->list, &tsk->send_buf.list);
+		pthread_mutex_unlock(&send_buf_lock);
+		if(!tsk->retrans_timer.enable)
+			tcp_set_retrans_timer(tsk);
+		
 		pt += data_len;
 		len -= data_len;
 	}

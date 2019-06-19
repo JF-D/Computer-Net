@@ -19,6 +19,16 @@ struct sock_addr {
 	u16 port;
 } __attribute__((packed));
 
+struct tbd_data_block {
+	struct list_head list;
+	u8  flags;
+	u8  times;
+	u32 seq;
+	u32 len;
+	u32 seq_end;
+	char *packet;
+};
+
 // the main structure that manages a connection locally
 struct tcp_sock {
 	// sk_ip, sk_sport, sk_sip, sk_dport are the 4-tuple that represents a 
@@ -76,9 +86,9 @@ struct tcp_sock {
 	// receiving buffer
 	struct ring_buffer *rcv_buf;
 	// used to pend unacked packets
-	struct list_head send_buf;
+	struct tbd_data_block send_buf;
 	// used to pend out-of-order packets
-	struct list_head rcv_ofo_buf;
+	struct tbd_data_block rcv_ofo_buf;
 
 	// tcp state, see enum tcp_state in tcp.h
 	int state;
@@ -111,6 +121,8 @@ struct tcp_sock {
 	// slow start threshold
 	u32 ssthresh;
 };
+
+struct tbd_data_block *new_tbd_data_block(u8 flags, u32 seq, u32 len, char *buf);
 
 void tcp_set_state(struct tcp_sock *tsk, int state);
 
@@ -147,6 +159,8 @@ struct tcp_sock *tcp_sock_accept(struct tcp_sock *tsk);
 void tcp_sock_close(struct tcp_sock *tsk);
 
 pthread_mutex_t rcv_buf_lock;
+pthread_mutex_t send_buf_lock;
+pthread_mutex_t rcv_ofo_buf_lock;
 int tcp_sock_read(struct tcp_sock *tsk, char *buf, int len);
 int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len);
 

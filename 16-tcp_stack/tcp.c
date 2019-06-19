@@ -14,7 +14,8 @@ const char *tcp_state_str[] = { "CLOSED", "LISTEN", "SYN_RECV",
 // assign an initial sending sequence number for a new tcp sock
 u32 tcp_new_iss()
 {
-	return (u32)rand();
+	//return (u32)rand();
+	return 0;
 }
 
 static int copy_flag_str(u8 flags, int flag, char *buf, int start, 

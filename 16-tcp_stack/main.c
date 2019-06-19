@@ -19,7 +19,7 @@
 #include <netinet/in.h>
 #include <linux/if_packet.h>
 #include <libgen.h>
-
+#include <signal.h>
 ustack_t *instance;
 
 static iface_info_t *fd_to_iface(int fd)
