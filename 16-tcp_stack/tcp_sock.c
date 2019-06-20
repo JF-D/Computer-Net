@@ -52,6 +52,7 @@ struct tcp_sock *alloc_tcp_sock()
 	tsk->state = TCP_CLOSED;
 	tsk->rcv_wnd = TCP_DEFAULT_WINDOW;
 	tsk->snd_wnd = TCP_DEFAULT_WINDOW;
+	tsk->adv_wnd = TCP_DEFAULT_WINDOW;
 
 	init_list_head(&tsk->list);
 	init_list_head(&tsk->listen_queue);
@@ -300,9 +301,9 @@ int tcp_sock_connect(struct tcp_sock *tsk, struct sock_addr *skaddr)
 	tsk->iss = tcp_new_iss();
 	tsk->snd_una = tsk->iss;
 	tsk->snd_nxt = tsk->iss;
+	struct tbd_data_block *dblk = new_tbd_data_block(TCP_SYN, tsk->snd_nxt, 0, NULL);
 	tcp_send_control_packet(tsk, TCP_SYN);
 	tcp_set_state(tsk, TCP_SYN_SENT);
-	struct tbd_data_block *dblk = new_tbd_data_block(TCP_SYN, tsk->snd_nxt, 0, NULL);
 	pthread_mutex_lock(&send_buf_lock);
 	list_add_tail(&dblk->list, &tsk->send_buf.list);
 	pthread_mutex_unlock(&send_buf_lock);
@@ -403,8 +404,8 @@ void tcp_sock_close(struct tcp_sock *tsk)
 	switch(tsk->state)
 	{
 		case TCP_ESTABLISHED:
-			tcp_send_control_packet(tsk, TCP_FIN | TCP_ACK);
 			dblk = new_tbd_data_block(TCP_FIN | TCP_ACK, tsk->snd_nxt, 0, NULL);
+			tcp_send_control_packet(tsk, TCP_FIN | TCP_ACK);
 			pthread_mutex_lock(&send_buf_lock);
 			list_add_tail(&dblk->list, &tsk->send_buf.list);
 			pthread_mutex_unlock(&send_buf_lock);
@@ -413,8 +414,8 @@ void tcp_sock_close(struct tcp_sock *tsk)
 			tcp_set_state(tsk, TCP_FIN_WAIT_1);
 			break;
 		case TCP_CLOSE_WAIT:
-			tcp_send_control_packet(tsk, TCP_FIN | TCP_ACK);
 			dblk = new_tbd_data_block(TCP_FIN | TCP_ACK, tsk->snd_nxt, 0, NULL);
+			tcp_send_control_packet(tsk, TCP_FIN | TCP_ACK);
 			pthread_mutex_lock(&send_buf_lock);
 			list_add_tail(&dblk->list, &tsk->send_buf.list);
 			pthread_mutex_unlock(&send_buf_lock);
@@ -438,7 +439,6 @@ int tcp_sock_read(struct tcp_sock *tsk, char *buf, int len)
 	int rlen = read_ring_buffer(tsk->rcv_buf, buf, len);
 	tsk->rcv_wnd += rlen;
 	pthread_mutex_unlock(&rcv_buf_lock);
-	//wake_up(tsk->wait_send);
 	return rlen;
 }
 
@@ -449,7 +449,7 @@ int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len)
 	{
 		int data_len = min(len, 1514 - ETHER_HDR_SIZE - IP_BASE_HDR_SIZE - TCP_BASE_HDR_SIZE);
 		int pkt_len  = data_len + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE;
-		while(tsk->snd_wnd < data_len)
+		while(tsk->snd_nxt - (tsk->snd_una - 1) >= tsk->adv_wnd || tsk->snd_wnd < data_len)
 		{
 			sleep_on(tsk->wait_send);
 		}

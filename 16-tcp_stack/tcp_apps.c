@@ -42,7 +42,7 @@ void *tcp_server(void *arg)
 
 	log(DEBUG, "accept a connection.");
 
-	FILE *fd = fopen("server-recv.dat", "wb");
+	FILE *fd = fopen("server-output.dat", "wb");
     char rbuf[10050];
 	int rlen = 0;
 	while (1) {

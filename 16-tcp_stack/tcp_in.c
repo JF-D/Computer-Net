@@ -71,121 +71,44 @@ void tcp_rcv_ofo_pkt(struct tcp_sock *tsk, struct tcp_cb *cb)
 	dblk = new_tbd_data_block(cb->flags, cb->seq, cb->pl_len, cb->payload);
 	list_for_each_entry_safe(tmp, q, &tsk->rcv_ofo_buf.list, list)
 	{
-		if(tmp->seq > cb->seq)
+		if(tmp->seq_end > cb->seq_end)
 			break;
 	}
 	q = list_entry(tmp->list.prev, struct tbd_data_block, list);
 	list_insert(&dblk->list, &q->list, &tmp->list);
 }
 
+void tcp_free_send_buf(struct tcp_sock *tsk, struct tcp_cb *cb)
+{
+	struct tbd_data_block *tmp, *q;
+	pthread_mutex_lock(&send_buf_lock);
+	list_for_each_entry_safe(tmp, q, &tsk->send_buf.list, list)
+	{
+		if(tmp->seq_end <= cb->ack)
+		{
+			list_delete_entry(&tmp->list);
+			free(tmp->packet);
+			free(tmp);
+			tcp_unset_retrans_timer(tsk);
+			if(!list_empty(&tsk->send_buf.list))
+				tcp_set_retrans_timer(tsk);
+		}
+	}
+	pthread_mutex_unlock(&send_buf_lock);
+}
+
 // Process the incoming packet according to TCP state machine. 
 void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 {
 	//fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
-	
-	if(cb->flags & TCP_ACK)
-	{
-		//tsk->rcv_nxt = cb->seq_end;
-		switch(tsk->state)
-		{
-		case TCP_ESTABLISHED:
-			if(cb->pl_len > 0)
-			{
-				if(!is_tcp_seq_valid(tsk, cb))
-					break;
-				if(tsk->rcv_nxt != cb->seq)
-				{
-					tcp_rcv_ofo_pkt(tsk, cb);
-					tcp_send_control_packet(tsk, TCP_ACK);
-					break;
-				}
-				
-				pthread_mutex_lock(&rcv_buf_lock);
-				write_ring_buffer(tsk->rcv_buf, cb->payload, cb->pl_len);
-				tsk->rcv_wnd -= cb->pl_len;
-				tsk->rcv_nxt = cb->seq_end;
-				struct tbd_data_block *tmp, *q;
-				list_for_each_entry_safe(tmp, q, &tsk->rcv_ofo_buf.list, list)
-				{
-					//printf("***** %u %u %u\n", tsk->rcv_nxt, tmp->len, tmp->seq);
-					if(tmp->seq == tsk->rcv_nxt)
-					{
-						/* while(ring_buffer_free(tsk->rcv_buf) < tmp->len)
-						{
-							pthread_mutex_unlock(&rcv_buf_lock);
-							wake_up(tsk->wait_recv);
-							sleep_on(tsk->wait_send);
-							pthread_mutex_lock(&rcv_buf_lock);
-						}*/
-						write_ring_buffer(tsk->rcv_buf, tmp->packet, tmp->len);
-						tsk->rcv_wnd -= tmp->len;
-						tsk->rcv_nxt = tmp->seq_end;
-						u8 flags = tmp->flags;
-						list_delete_entry(&tmp->list);
-						free(tmp->packet);
-						free(tmp);
-						if(flags & TCP_FIN)
-						{
-							tcp_send_FIN_ACK(tsk);
-							break;
-						}
-					}
-					else
-						break;
-				}
-				pthread_mutex_unlock(&rcv_buf_lock);
-				wake_up(tsk->wait_recv);
-				tcp_send_control_packet(tsk, TCP_ACK);
-			}
-			else
-			{
-				tsk->snd_wnd = cb->rwnd;
-				wake_up(tsk->wait_send);
-			}
-			struct tbd_data_block *tmp, *q;
-			pthread_mutex_lock(&send_buf_lock);
-			list_for_each_entry_safe(tmp, q, &tsk->send_buf.list, list)
-			{
-				if(tmp->seq_end <= cb->ack)
-				{
-					list_delete_entry(&tmp->list);
-					free(tmp->packet);
-					free(tmp);
-					tcp_unset_retrans_timer(tsk);
-					if(!list_empty(&tsk->send_buf.list))
-						tcp_set_retrans_timer(tsk);
-				}
-			}
-			pthread_mutex_unlock(&send_buf_lock);
-			break;
-		case TCP_SYN_RECV:
-			tsk->rcv_nxt = cb->seq_end;
-			tcp_set_state(tsk, TCP_ESTABLISHED);
-			tcp_sock_accept_enqueue(tsk);
-			wake_up(tsk->parent->wait_accept);
-			break;
-		case TCP_FIN_WAIT_1:
-			tsk->rcv_nxt = cb->seq_end;
-			tcp_set_state(tsk, TCP_FIN_WAIT_2);
-			break;
-		case TCP_LAST_ACK:
-			tsk->rcv_nxt = cb->seq_end;
-			tcp_set_state(tsk, TCP_CLOSED);
-			break;
-		default:
-			break;
-		}
-	}
-
 	if(cb->flags & TCP_RST)
-	{
-		//RST: reset the tcp sock
+	{ //RST: reset the tcp sock
 		tcp_sock_close(tsk);
 		return ;
 	}
-	else if(cb->flags & TCP_SYN)
-	{
-		//SYN & ACK: 
+	
+	if(cb->flags & TCP_SYN)
+	{   //SYN & ACK: 
 		if((cb->flags & TCP_ACK) && tsk->state == TCP_SYN_SENT)
 		{
 			tsk->rcv_nxt = cb->seq_end;
@@ -219,10 +142,93 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 		}
 		
 	}
-	else if(cb->flags & TCP_FIN)
+	if(cb->flags & TCP_FIN) printf("1receive FIN\n");
+	if(!is_tcp_seq_valid(tsk, cb))
+		return ;
+	if(cb->flags & TCP_FIN) printf("2receive FIN\n");
+
+	if(cb->flags & TCP_ACK)
+	{  //tsk->rcv_nxt = cb->seq_end;
+		switch(tsk->state)
+		{
+		case TCP_ESTABLISHED:
+			tsk->snd_una = max(tsk->snd_una, cb->ack);
+			tsk->adv_wnd = cb->rwnd;
+			if(cb->pl_len > 0)
+			{
+				if(cb->flags & TCP_FIN) printf("ACK seq: %u, rcv_nxt: %u\n", cb->seq, tsk->rcv_nxt);
+				if(tsk->rcv_nxt != cb->seq)
+				{
+					tcp_rcv_ofo_pkt(tsk, cb);
+					tcp_send_control_packet(tsk, TCP_ACK);
+					break;
+				}
+				
+				pthread_mutex_lock(&rcv_buf_lock);
+				write_ring_buffer(tsk->rcv_buf, cb->payload, cb->pl_len);
+				tsk->rcv_wnd -= cb->pl_len;
+				tsk->rcv_nxt = cb->seq_end;
+				u8 fin_flag = 0;
+				struct tbd_data_block *tmp, *q;
+				list_for_each_entry_safe(tmp, q, &tsk->rcv_ofo_buf.list, list)
+				{
+					if(tmp->seq == tsk->rcv_nxt)
+					{
+						write_ring_buffer(tsk->rcv_buf, tmp->packet, tmp->len);
+						tsk->rcv_wnd -= tmp->len;
+						tsk->rcv_nxt = tmp->seq_end;
+						fin_flag = tmp->flags & TCP_FIN;
+						if(fin_flag) printf("recv fin pkt\n");
+						list_delete_entry(&tmp->list);
+						free(tmp->packet);
+						free(tmp);
+					}
+					else
+						break;
+				}
+				pthread_mutex_unlock(&rcv_buf_lock);
+				wake_up(tsk->wait_recv);
+				if(fin_flag)
+				{
+					printf("deal fin pkt\n");
+					tcp_send_FIN_ACK(tsk);
+				}
+				else
+					tcp_send_control_packet(tsk, TCP_ACK);
+			}
+			else
+			{
+				tsk->snd_wnd = cb->rwnd;
+				wake_up(tsk->wait_send);
+			}
+			break;
+		case TCP_SYN_RECV:
+			tsk->rcv_nxt = cb->seq_end;
+			tcp_set_state(tsk, TCP_ESTABLISHED);
+			tcp_sock_accept_enqueue(tsk);
+			wake_up(tsk->parent->wait_accept);
+			break;
+		case TCP_FIN_WAIT_1:
+			tsk->rcv_nxt = cb->seq_end;
+			tcp_set_state(tsk, TCP_FIN_WAIT_2);
+			break;
+		case TCP_LAST_ACK:
+			tsk->rcv_nxt = cb->seq_end;
+			tcp_set_state(tsk, TCP_CLOSED);
+			break;
+		default:
+			break;
+		}
+		tcp_free_send_buf(tsk, cb);
+	}
+
+	if(cb->flags & TCP_FIN)
 	{
-		if(cb->seq != tsk->rcv_nxt)
-			return ;
-		tcp_send_FIN_ACK(tsk);
+		printf("FIN seq: %u, rcv_nxt: %u\n", cb->seq_end, tsk->rcv_nxt);
+		if(cb->seq_end == tsk->rcv_nxt || cb->seq == tsk->rcv_nxt)
+		{
+			tsk->rcv_nxt = cb->seq_end;
+			tcp_send_FIN_ACK(tsk);
+		}
 	}
 }
