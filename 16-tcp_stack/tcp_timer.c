@@ -32,7 +32,6 @@ void tcp_scan_timer_list()
 			struct tbd_data_block *dblk = list_entry(tsk->send_buf.list.next, struct tbd_data_block, list);
 			if(dblk->times >= 3)
 			{
-				printf("rst: %u %u\n", dblk->seq, tsk->rcv_nxt);
 				tcp_send_control_packet(tsk, TCP_RST | TCP_ACK);
 				continue;
 			}
@@ -41,12 +40,10 @@ void tcp_scan_timer_list()
 			tsk->snd_nxt = dblk->seq;
 			if(dblk->flags & (TCP_SYN | TCP_FIN))
 			{
-				printf("resent SYN|FIN: %u %u %d %d\n", dblk->seq, dblk->len, dblk->flags & TCP_SYN, dblk->flags & TCP_FIN);
 				tcp_send_control_packet(tsk, dblk->flags);
 			}
 			else
 			{
-				printf("resent: %u %u\n", dblk->seq, dblk->len);
 				int pkt_len  = dblk->len + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE;
 				char *packet = malloc(pkt_len);
 				memcpy(packet + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE, dblk->packet, dblk->len);

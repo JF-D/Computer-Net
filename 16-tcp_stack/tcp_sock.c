@@ -429,13 +429,16 @@ void tcp_sock_close(struct tcp_sock *tsk)
 
 int tcp_sock_read(struct tcp_sock *tsk, char *buf, int len)
 {
+	pthread_mutex_lock(&rcv_buf_lock);
 	while(ring_buffer_empty(tsk->rcv_buf))
 	{
+		pthread_mutex_unlock(&rcv_buf_lock);
 		if(tsk->state == TCP_CLOSE_WAIT)
-			break;
+			return 0;
+		tcp_send_control_packet(tsk, TCP_ACK);
 		sleep_on(tsk->wait_recv);
+		pthread_mutex_lock(&rcv_buf_lock);
 	}
-	pthread_mutex_lock(&rcv_buf_lock);
 	int rlen = read_ring_buffer(tsk->rcv_buf, buf, len);
 	tsk->rcv_wnd += rlen;
 	pthread_mutex_unlock(&rcv_buf_lock);
@@ -448,8 +451,9 @@ int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len)
 	while(len)
 	{
 		int data_len = min(len, 1514 - ETHER_HDR_SIZE - IP_BASE_HDR_SIZE - TCP_BASE_HDR_SIZE);
+		data_len = min(data_len, tsk->snd_wnd);
 		int pkt_len  = data_len + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE;
-		while(tsk->snd_nxt - (tsk->snd_una - 1) >= tsk->adv_wnd || tsk->snd_wnd < data_len)
+		while(tsk->snd_nxt + data_len - (tsk->snd_una - 1) >= tsk->adv_wnd || tsk->snd_wnd < data_len)
 		{
 			sleep_on(tsk->wait_send);
 		}

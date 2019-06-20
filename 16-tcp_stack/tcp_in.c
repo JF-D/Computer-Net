@@ -142,10 +142,8 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 		}
 		
 	}
-	if(cb->flags & TCP_FIN) printf("1receive FIN\n");
 	if(!is_tcp_seq_valid(tsk, cb))
 		return ;
-	if(cb->flags & TCP_FIN) printf("2receive FIN\n");
 
 	if(cb->flags & TCP_ACK)
 	{  //tsk->rcv_nxt = cb->seq_end;
@@ -154,9 +152,10 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 		case TCP_ESTABLISHED:
 			tsk->snd_una = max(tsk->snd_una, cb->ack);
 			tsk->adv_wnd = cb->rwnd;
+			tsk->snd_wnd = cb->rwnd;
+			wake_up(tsk->wait_send);
 			if(cb->pl_len > 0)
 			{
-				if(cb->flags & TCP_FIN) printf("ACK seq: %u, rcv_nxt: %u\n", cb->seq, tsk->rcv_nxt);
 				if(tsk->rcv_nxt != cb->seq)
 				{
 					tcp_rcv_ofo_pkt(tsk, cb);
@@ -164,9 +163,11 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 					break;
 				}
 				
+				wake_up(tsk->wait_recv);
 				pthread_mutex_lock(&rcv_buf_lock);
 				write_ring_buffer(tsk->rcv_buf, cb->payload, cb->pl_len);
 				tsk->rcv_wnd -= cb->pl_len;
+				pthread_mutex_unlock(&rcv_buf_lock);
 				tsk->rcv_nxt = cb->seq_end;
 				u8 fin_flag = 0;
 				struct tbd_data_block *tmp, *q;
@@ -174,11 +175,13 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 				{
 					if(tmp->seq == tsk->rcv_nxt)
 					{
+						wake_up(tsk->wait_recv);
+						pthread_mutex_lock(&rcv_buf_lock);
 						write_ring_buffer(tsk->rcv_buf, tmp->packet, tmp->len);
 						tsk->rcv_wnd -= tmp->len;
+						pthread_mutex_unlock(&rcv_buf_lock);
 						tsk->rcv_nxt = tmp->seq_end;
 						fin_flag = tmp->flags & TCP_FIN;
-						if(fin_flag) printf("recv fin pkt\n");
 						list_delete_entry(&tmp->list);
 						free(tmp->packet);
 						free(tmp);
@@ -186,20 +189,13 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 					else
 						break;
 				}
-				pthread_mutex_unlock(&rcv_buf_lock);
-				wake_up(tsk->wait_recv);
+				
 				if(fin_flag)
 				{
-					printf("deal fin pkt\n");
 					tcp_send_FIN_ACK(tsk);
 				}
 				else
 					tcp_send_control_packet(tsk, TCP_ACK);
-			}
-			else
-			{
-				tsk->snd_wnd = cb->rwnd;
-				wake_up(tsk->wait_send);
 			}
 			break;
 		case TCP_SYN_RECV:
@@ -224,7 +220,6 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 
 	if(cb->flags & TCP_FIN)
 	{
-		printf("FIN seq: %u, rcv_nxt: %u\n", cb->seq_end, tsk->rcv_nxt);
 		if(cb->seq_end == tsk->rcv_nxt || cb->seq == tsk->rcv_nxt)
 		{
 			tsk->rcv_nxt = cb->seq_end;
