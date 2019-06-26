@@ -6,6 +6,7 @@
 #include "ring_buffer.h"
 
 #include <stdlib.h>
+#include <sys/time.h>
 // update the snd_wnd of tcp_sock
 //
 // if the snd_wnd before updating is zero, notify tcp_sock_send (wait_send)
@@ -71,9 +72,11 @@ void tcp_rcv_ofo_pkt(struct tcp_sock *tsk, struct tcp_cb *cb)
 	dblk = new_tbd_data_block(cb->flags, cb->seq, cb->pl_len, cb->payload);
 	list_for_each_entry_safe(tmp, q, &tsk->rcv_ofo_buf.list, list)
 	{
-		if(tmp->seq_end > cb->seq_end)
+		if(tmp->seq_end >= cb->seq_end)
 			break;
 	}
+	if(tmp->seq_end == cb->seq_end)
+		return ;
 	q = list_entry(tmp->list.prev, struct tbd_data_block, list);
 	list_insert(&dblk->list, &q->list, &tmp->list);
 }
@@ -81,10 +84,9 @@ void tcp_rcv_ofo_pkt(struct tcp_sock *tsk, struct tcp_cb *cb)
 void tcp_free_send_buf(struct tcp_sock *tsk, struct tcp_cb *cb)
 {
 	struct tbd_data_block *tmp, *q;
-	pthread_mutex_lock(&send_buf_lock);
+	//pthread_mutex_lock(&send_buf_lock);
 	list_for_each_entry_safe(tmp, q, &tsk->send_buf.list, list)
 	{
-		//printf("???%d %d %d %d\n", tmp->seq, tmp->seq_end, cb->ack, tmp->len);
 		if(tmp->seq_end <= cb->ack)
 		{
 			list_delete_entry(&tmp->list);
@@ -95,7 +97,7 @@ void tcp_free_send_buf(struct tcp_sock *tsk, struct tcp_cb *cb)
 				tcp_set_retrans_timer(tsk);
 		}
 	}
-	pthread_mutex_unlock(&send_buf_lock);
+	//pthread_mutex_unlock(&send_buf_lock);
 }
 
 int tcp_retransmission(struct tcp_sock *tsk, u32 seq)
@@ -103,12 +105,10 @@ int tcp_retransmission(struct tcp_sock *tsk, u32 seq)
 	struct tbd_data_block *dblk = list_entry(tsk->send_buf.list.next, struct tbd_data_block, list);
 	if(seq != dblk->seq)
 	{
-		//log(ERROR, "Tcp Retransmission error.(%d, %d)", seq, dblk->seq);
-		printf("Tcp Retransmission error.(%d, %d)\n", seq, dblk->seq);
+		log(ERROR, "Tcp Retransmission error.(%d, %d)", seq, dblk->seq);
 		return 0;
 	}
-	//printf("tcp retran: snd_nxt: %d, seq: %d, seq_end: %d, len: %d\n", tsk->snd_nxt, dblk->seq, dblk->seq_end, dblk->len);
-	pthread_mutex_lock(&send_buf_lock);
+	//pthread_mutex_lock(&send_buf_lock);
 	u32 cur_seq = tsk->snd_nxt;
 	tsk->snd_nxt = dblk->seq;
 	if(dblk->flags & (TCP_SYN | TCP_FIN))
@@ -123,13 +123,21 @@ int tcp_retransmission(struct tcp_sock *tsk, u32 seq)
 		tcp_send_packet(tsk, packet, pkt_len);
 	}
 	tsk->snd_nxt = cur_seq;
-	pthread_mutex_unlock(&send_buf_lock);
+	//pthread_mutex_unlock(&send_buf_lock);
 	return 1;
 }
 
 int avoid_cnt = 0, retran_cnt = 0;
-u32 reseq = -1, reack_cnt = 0;
-
+u32 reseq = -1, reack_cnt = 0, last_ack = -1;
+extern FILE *cwnd_fd;
+extern struct timeval start, end;
+void dump_cwnd(struct tcp_sock *tsk)
+{
+	if(tsk->parent != NULL)
+		return ;
+	gettimeofday(&end, NULL);
+	fprintf(cwnd_fd, "%d %d\n", tsk->cwnd, 1000000 * ( end.tv_sec - start.tv_sec ) + end.tv_usec - start.tv_usec);				
+}
 // Process the incoming packet according to TCP state machine. 
 void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 {
@@ -167,9 +175,9 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 			tcp_hash(child_sock);
 			struct tbd_data_block *dblk = new_tbd_data_block(TCP_SYN | TCP_ACK, child_sock->snd_nxt, 0, NULL);
 			tcp_send_control_packet(child_sock, TCP_SYN | TCP_ACK);
-			pthread_mutex_lock(&send_buf_lock);
+			//pthread_mutex_lock(&send_buf_lock);
 			list_add_tail(&dblk->list, &child_sock->send_buf.list);
-			pthread_mutex_unlock(&send_buf_lock);
+			//pthread_mutex_unlock(&send_buf_lock);
 			if(!child_sock->retrans_timer.enable)
 				tcp_set_retrans_timer(child_sock);
 		}
@@ -183,49 +191,56 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 		switch(tsk->state)
 		{
 		case TCP_ESTABLISHED:
-			//printf("\n\nack: %d ", cb->ack);
+			if(cb->ack < tsk->snd_una)
+				break;
 			if(cb->pl_len <= 0)
 			{
-				//printf("cwnd: %d, ssthresh: %d\n", tsk->cwnd, tsk->ssthresh);
 				if(tsk->cwnd < tsk->ssthresh)
+				{
 					tsk->cwnd += MSS;
+					dump_cwnd(tsk);
+				}
 				else
 				{
 					if(avoid_cnt == 0)
 						avoid_cnt = tsk->cwnd / MSS;
 					avoid_cnt -= 1;
 					if(avoid_cnt == 0)
+					{
 						tsk->cwnd += MSS;
+						dump_cwnd(tsk);
+					}
 				}
-				//printf("rp: %d, ack: %d, snd: %d\n", tsk->recovery_point, cb->ack, tsk->snd_nxt);
-				if(cb->ack < tsk->recovery_point)
+				if(cb->ack < tsk->recovery_point && reseq != cb->ack)
 				{
 					tcp_free_send_buf(tsk, cb);
 					tcp_retransmission(tsk, cb->ack);
+					reseq = cb->ack;
 				}
 
-				//printf("reack_cnt: %d, snd_una: %d\n", reack_cnt, tsk->snd_una);
-				if(tsk->snd_una == cb->ack)
+				if(last_ack == cb->ack && cb->ack >= tsk->recovery_point)
 				{
 					reack_cnt ++;
 					if(reack_cnt == 3)
 					{
 						tcp_free_send_buf(tsk, cb);
 						tcp_retransmission(tsk, cb->ack);
-						//retran_cnt = tsk->ssthresh;
 						tsk->ssthresh = ((tsk->cwnd/MSS)/2)*MSS;
 						tsk->cwnd = tsk->ssthresh;
+						dump_cwnd(tsk);
 						tsk->recovery_point = tsk->snd_nxt;
 					}
 				}
 				else
+				{
+					last_ack = cb->ack;
 					reack_cnt = 0;
+				}
 			}
 			tsk->snd_una = max(tsk->snd_una, cb->ack);
 			tsk->adv_wnd = cb->rwnd;
 			tsk->snd_wnd = min(tsk->adv_wnd, tsk->cwnd);
 			wake_up(tsk->wait_send);
-			//printf("snd_una: %d, adv_wnd: %d, snd_wnd: %d, snd_nxt: %d\n", tsk->snd_una, tsk->adv_wnd, tsk->snd_wnd, tsk->snd_nxt);
 
 			if(cb->pl_len > 0)
 			{
@@ -242,7 +257,6 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 				tsk->rcv_wnd -= MSS;
 				pthread_mutex_unlock(&rcv_buf_lock);
 				tsk->rcv_nxt = cb->seq_end;
-				//printf("seq: %d, seq_end: %d\n", cb->seq, cb->seq_end);
 				u8 fin_flag = 0;
 				struct tbd_data_block *tmp, *q;
 				list_for_each_entry_safe(tmp, q, &tsk->rcv_ofo_buf.list, list)
@@ -255,14 +269,11 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 						tsk->rcv_wnd -= MSS;
 						pthread_mutex_unlock(&rcv_buf_lock);
 						tsk->rcv_nxt = tmp->seq_end;
-						//printf("seq: %d, seq_end: %d\n", tmp->seq, tmp->seq_end);
 						fin_flag = tmp->flags & TCP_FIN;
 						list_delete_entry(&tmp->list);
 						free(tmp->packet);
 						free(tmp);
 					}
-					else
-						break;
 				}
 				
 				if(fin_flag)

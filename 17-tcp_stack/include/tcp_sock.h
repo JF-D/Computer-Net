@@ -10,6 +10,7 @@
 #include "synch_wait.h"
 
 #include <pthread.h>
+#include <stdio.h>
 
 #define PORT_MIN	12345
 #define PORT_MAX	23456
@@ -165,5 +166,5 @@ int tcp_sock_read(struct tcp_sock *tsk, char *buf, int len);
 int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len);
 
 int tcp_retransmission(struct tcp_sock *tsk, u32 seq);
-
+void dump_cwnd(struct tcp_sock *tsk);
 #endif

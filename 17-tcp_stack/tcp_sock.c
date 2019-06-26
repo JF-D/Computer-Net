@@ -54,7 +54,7 @@ struct tcp_sock *alloc_tcp_sock()
 	tsk->cwnd = MSS;
 	tsk->adv_wnd = (TCP_DEFAULT_WINDOW/MSS)*MSS;
 	tsk->snd_wnd = min(tsk->cwnd, tsk->adv_wnd);
-	tsk->ssthresh = ((TCP_DEFAULT_WINDOW/MSS)/2) * MSS;
+	tsk->ssthresh = ((TCP_DEFAULT_WINDOW/MSS)) * MSS;
 
 	init_list_head(&tsk->list);
 	init_list_head(&tsk->listen_queue);
@@ -459,7 +459,7 @@ int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len)
 		{
 			sleep_on(tsk->wait_send);
 		}
-		pthread_mutex_lock(&send_buf_lock);
+		//pthread_mutex_lock(&send_buf_lock);
 		u32 seq = tsk->snd_nxt;
 		char *packet = malloc(pkt_len);
 		memcpy(packet + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE, buf + pt, data_len);
@@ -467,9 +467,8 @@ int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len)
 		
 		//wait to be ACK
 		struct tbd_data_block *dblk = new_tbd_data_block(TCP_ACK, seq, data_len, buf + pt);
-		//printf("$$$send:: seq: %d, seq_end: %d, len: %d\n", dblk->seq, dblk->seq_end, data_len);
 		list_add_tail(&dblk->list, &tsk->send_buf.list);
-		pthread_mutex_unlock(&send_buf_lock);
+		//pthread_mutex_unlock(&send_buf_lock);
 		if(!tsk->retrans_timer.enable)
 			tcp_set_retrans_timer(tsk);
 		

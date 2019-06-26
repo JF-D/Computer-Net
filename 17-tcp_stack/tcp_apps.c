@@ -10,7 +10,7 @@ int myread(char a[], FILE *fd)
 {
     int len = 0;
     char c;
-    while(len < 10000 && (c = fgetc(fd)) != EOF)
+    while(len < 100000 && (c = fgetc(fd)) != EOF)
         a[len++] = c;
     a[len] = '\0';
     return len;
@@ -43,10 +43,10 @@ void *tcp_server(void *arg)
 	log(DEBUG, "accept a connection.");
 
 	FILE *fd = fopen("server-output.dat", "wb");
-    char rbuf[10050];
+    char rbuf[100050];
 	int rlen = 0;
 	while (1) {
-		rlen = tcp_sock_read(csk, rbuf, 10000);
+		rlen = tcp_sock_read(csk, rbuf, 100000);
 		if (rlen == 0) {
 			log(DEBUG, "tcp_sock_read return 0, finish transmission.");
 			break;
@@ -86,7 +86,7 @@ void *tcp_client(void *arg)
 	}
 	printf("connect!\n");
 
-    char wbuf[10050];
+    char wbuf[100050];
     FILE *fd = fopen("client-input.dat", "rb");
     int wlen;
     while((wlen = myread(wbuf, fd)) != 0)

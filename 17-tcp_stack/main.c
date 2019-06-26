@@ -16,6 +16,7 @@
 #include <ifaddrs.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <linux/if_packet.h>
 #include <libgen.h>
@@ -289,6 +290,9 @@ static void run_application(const char *basename, char **args, int n)
 	}
 }
 
+FILE *cwnd_fd;
+struct timeval start, end;
+
 int main(int argc, char **argv)
 {
 	if (getuid() && geteuid()) {
@@ -299,6 +303,9 @@ int main(int argc, char **argv)
 	if (argc < 2) {
 		usage_and_exit(argv[0]);
 	}
+
+	cwnd_fd = fopen("cwnd.dat", "wb");
+	gettimeofday(&start, NULL);
 
 	init_ustack();
 

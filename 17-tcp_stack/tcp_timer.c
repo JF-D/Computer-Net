@@ -4,9 +4,11 @@
 
 #include <stdio.h>
 #include <unistd.h>
+#include <sys/time.h>
 
 static struct list_head timer_list;
-
+extern FILE *cwnd_fd;
+extern struct timeval start, end;
 // scan the timer_list, find the tcp sock which stays for at 2*MSL, release it
 void tcp_scan_timer_list()
 {
@@ -35,18 +37,15 @@ void tcp_scan_timer_list()
 				tcp_send_control_packet(tsk, TCP_RST | TCP_ACK);
 				continue;
 			}
-			tsk->ssthresh  = ((tsk->cwnd/MSS)/2)*MSS;
+			tsk->ssthresh = ((tsk->cwnd/MSS)/2)*MSS;
 			tsk->cwnd = MSS;
-			//printf("timer");
+			dump_cwnd(tsk);
 			//pthread_mutex_lock(&send_buf_lock);
-			//printf("###################\n");
 			struct tbd_data_block *q = dblk;
 			u32 seq = tsk->snd_nxt;
 			tsk->snd_nxt = dblk->seq;
 			/* list_for_each_entry(dblk, &tsk->send_buf.list, list)
 			{
-				if(dblk->seq_end > tsk->recovery_point)
-					break;
 				if(dblk->seq_end <= tsk->snd_nxt)
 					continue;*/
 				dblk->times += 1;
