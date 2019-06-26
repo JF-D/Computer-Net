@@ -164,4 +164,6 @@ pthread_mutex_t rcv_ofo_buf_lock;
 int tcp_sock_read(struct tcp_sock *tsk, char *buf, int len);
 int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len);
 
+int tcp_retransmission(struct tcp_sock *tsk, u32 seq);
+
 #endif

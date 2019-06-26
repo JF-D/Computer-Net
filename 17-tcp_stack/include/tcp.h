@@ -4,6 +4,7 @@
 #include "types.h"
 #include "ip.h"
 #include "checksum.h"
+#include "ether.h"
 
 #include <endian.h>
 
@@ -40,6 +41,7 @@ struct tcphdr {
 #define TCP_HDR_OFFSET 5
 #define TCP_BASE_HDR_SIZE 20
 #define TCP_HDR_SIZE(tcp) (tcp->off * 4)
+#define MSS (1514 - ETHER_HDR_SIZE - IP_BASE_HDR_SIZE - TCP_BASE_HDR_SIZE)
 
 #define TCP_DEFAULT_WINDOW 65535
 

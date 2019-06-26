@@ -35,22 +35,36 @@ void tcp_scan_timer_list()
 				tcp_send_control_packet(tsk, TCP_RST | TCP_ACK);
 				continue;
 			}
-			dblk->times += 1;
-			u32 cur_seq = tsk->snd_nxt;
+			tsk->ssthresh  = ((tsk->cwnd/MSS)/2)*MSS;
+			tsk->cwnd = MSS;
+			//printf("timer");
+			//pthread_mutex_lock(&send_buf_lock);
+			//printf("###################\n");
+			struct tbd_data_block *q = dblk;
+			u32 seq = tsk->snd_nxt;
 			tsk->snd_nxt = dblk->seq;
-			if(dblk->flags & (TCP_SYN | TCP_FIN))
+			/* list_for_each_entry(dblk, &tsk->send_buf.list, list)
 			{
-				tcp_send_control_packet(tsk, dblk->flags);
-			}
-			else
-			{
-				int pkt_len  = dblk->len + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE;
-				char *packet = malloc(pkt_len);
-				memcpy(packet + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE, dblk->packet, dblk->len);
-				tcp_send_packet(tsk, packet, pkt_len);
-			}
-			tsk->snd_nxt = cur_seq;
-			p->timeout = TCP_RETRANS_INTERVAL_INITIAL * (1 << (dblk->times + 1));
+				if(dblk->seq_end > tsk->recovery_point)
+					break;
+				if(dblk->seq_end <= tsk->snd_nxt)
+					continue;*/
+				dblk->times += 1;
+				if(dblk->flags & (TCP_SYN | TCP_FIN))
+				{
+					tcp_send_control_packet(tsk, dblk->flags);
+				}
+				else
+				{
+					int pkt_len  = dblk->len + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE;
+					char *packet = malloc(pkt_len);
+					memcpy(packet + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE, dblk->packet, dblk->len);
+					tcp_send_packet(tsk, packet, pkt_len);
+				}
+			tsk->snd_nxt = seq;
+			//}
+			//pthread_mutex_unlock(&send_buf_lock);
+			p->timeout = TCP_RETRANS_INTERVAL_INITIAL * (1 << (q->times + 1));
 		}
 	}
 }

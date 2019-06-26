@@ -54,7 +54,7 @@ void tcp_send_packet(struct tcp_sock *tsk, char *packet, int len)
 	ip->checksum = ip_checksum(ip);
 
 	tsk->snd_nxt += tcp_data_len;
-	tsk->snd_wnd -= tcp_data_len;
+	tsk->snd_wnd -= MSS;
 
 	ip_send_packet(packet, len);
 }

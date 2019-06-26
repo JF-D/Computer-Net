@@ -50,9 +50,11 @@ struct tcp_sock *alloc_tcp_sock()
 	memset(tsk, 0, sizeof(struct tcp_sock));
 
 	tsk->state = TCP_CLOSED;
-	tsk->rcv_wnd = TCP_DEFAULT_WINDOW;
-	tsk->snd_wnd = TCP_DEFAULT_WINDOW;
-	tsk->adv_wnd = TCP_DEFAULT_WINDOW;
+	tsk->rcv_wnd = (TCP_DEFAULT_WINDOW/MSS)*MSS;
+	tsk->cwnd = MSS;
+	tsk->adv_wnd = (TCP_DEFAULT_WINDOW/MSS)*MSS;
+	tsk->snd_wnd = min(tsk->cwnd, tsk->adv_wnd);
+	tsk->ssthresh = ((TCP_DEFAULT_WINDOW/MSS)/2) * MSS;
 
 	init_list_head(&tsk->list);
 	init_list_head(&tsk->listen_queue);
@@ -435,12 +437,13 @@ int tcp_sock_read(struct tcp_sock *tsk, char *buf, int len)
 		pthread_mutex_unlock(&rcv_buf_lock);
 		if(tsk->state == TCP_CLOSE_WAIT)
 			return 0;
+		//printf("ack: %d, rcv_wnd: %d\n", tsk->rcv_nxt, tsk->rcv_wnd);
 		tcp_send_control_packet(tsk, TCP_ACK);
 		sleep_on(tsk->wait_recv);
 		pthread_mutex_lock(&rcv_buf_lock);
 	}
 	int rlen = read_ring_buffer(tsk->rcv_buf, buf, len);
-	tsk->rcv_wnd += rlen;
+	tsk->rcv_wnd += ((rlen+MSS-1)/MSS)*MSS;
 	pthread_mutex_unlock(&rcv_buf_lock);
 	return rlen;
 }
@@ -450,21 +453,21 @@ int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len)
 	int pt = 0;
 	while(len)
 	{
-		int data_len = min(len, 1514 - ETHER_HDR_SIZE - IP_BASE_HDR_SIZE - TCP_BASE_HDR_SIZE);
-		data_len = min(data_len, tsk->snd_wnd);
+		int data_len = min(len, MSS);
 		int pkt_len  = data_len + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE;
-		while(tsk->snd_nxt + data_len - (tsk->snd_una - 1) >= tsk->adv_wnd || tsk->snd_wnd < data_len)
+		while(tsk->snd_nxt + MSS - tsk->snd_una > tsk->adv_wnd || tsk->snd_wnd < MSS)
 		{
 			sleep_on(tsk->wait_send);
 		}
-		char *packet = malloc(pkt_len);
+		pthread_mutex_lock(&send_buf_lock);
 		u32 seq = tsk->snd_nxt;
+		char *packet = malloc(pkt_len);
 		memcpy(packet + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE, buf + pt, data_len);
 		tcp_send_packet(tsk, packet, pkt_len);
 		
 		//wait to be ACK
 		struct tbd_data_block *dblk = new_tbd_data_block(TCP_ACK, seq, data_len, buf + pt);
-		pthread_mutex_lock(&send_buf_lock);
+		//printf("$$$send:: seq: %d, seq_end: %d, len: %d\n", dblk->seq, dblk->seq_end, data_len);
 		list_add_tail(&dblk->list, &tsk->send_buf.list);
 		pthread_mutex_unlock(&send_buf_lock);
 		if(!tsk->retrans_timer.enable)

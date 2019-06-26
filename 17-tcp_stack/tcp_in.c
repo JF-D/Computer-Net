@@ -84,6 +84,7 @@ void tcp_free_send_buf(struct tcp_sock *tsk, struct tcp_cb *cb)
 	pthread_mutex_lock(&send_buf_lock);
 	list_for_each_entry_safe(tmp, q, &tsk->send_buf.list, list)
 	{
+		//printf("???%d %d %d %d\n", tmp->seq, tmp->seq_end, cb->ack, tmp->len);
 		if(tmp->seq_end <= cb->ack)
 		{
 			list_delete_entry(&tmp->list);
@@ -96,6 +97,38 @@ void tcp_free_send_buf(struct tcp_sock *tsk, struct tcp_cb *cb)
 	}
 	pthread_mutex_unlock(&send_buf_lock);
 }
+
+int tcp_retransmission(struct tcp_sock *tsk, u32 seq)
+{
+	struct tbd_data_block *dblk = list_entry(tsk->send_buf.list.next, struct tbd_data_block, list);
+	if(seq != dblk->seq)
+	{
+		//log(ERROR, "Tcp Retransmission error.(%d, %d)", seq, dblk->seq);
+		printf("Tcp Retransmission error.(%d, %d)\n", seq, dblk->seq);
+		return 0;
+	}
+	//printf("tcp retran: snd_nxt: %d, seq: %d, seq_end: %d, len: %d\n", tsk->snd_nxt, dblk->seq, dblk->seq_end, dblk->len);
+	pthread_mutex_lock(&send_buf_lock);
+	u32 cur_seq = tsk->snd_nxt;
+	tsk->snd_nxt = dblk->seq;
+	if(dblk->flags & (TCP_SYN | TCP_FIN))
+	{
+		tcp_send_control_packet(tsk, dblk->flags);
+	}
+	else
+	{
+		int pkt_len  = dblk->len + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE;
+		char *packet = malloc(pkt_len);
+		memcpy(packet + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE, dblk->packet, dblk->len);
+		tcp_send_packet(tsk, packet, pkt_len);
+	}
+	tsk->snd_nxt = cur_seq;
+	pthread_mutex_unlock(&send_buf_lock);
+	return 1;
+}
+
+int avoid_cnt = 0, retran_cnt = 0;
+u32 reseq = -1, reack_cnt = 0;
 
 // Process the incoming packet according to TCP state machine. 
 void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
@@ -150,10 +183,50 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 		switch(tsk->state)
 		{
 		case TCP_ESTABLISHED:
+			//printf("\n\nack: %d ", cb->ack);
+			if(cb->pl_len <= 0)
+			{
+				//printf("cwnd: %d, ssthresh: %d\n", tsk->cwnd, tsk->ssthresh);
+				if(tsk->cwnd < tsk->ssthresh)
+					tsk->cwnd += MSS;
+				else
+				{
+					if(avoid_cnt == 0)
+						avoid_cnt = tsk->cwnd / MSS;
+					avoid_cnt -= 1;
+					if(avoid_cnt == 0)
+						tsk->cwnd += MSS;
+				}
+				//printf("rp: %d, ack: %d, snd: %d\n", tsk->recovery_point, cb->ack, tsk->snd_nxt);
+				if(cb->ack < tsk->recovery_point)
+				{
+					tcp_free_send_buf(tsk, cb);
+					tcp_retransmission(tsk, cb->ack);
+				}
+
+				//printf("reack_cnt: %d, snd_una: %d\n", reack_cnt, tsk->snd_una);
+				if(tsk->snd_una == cb->ack)
+				{
+					reack_cnt ++;
+					if(reack_cnt == 3)
+					{
+						tcp_free_send_buf(tsk, cb);
+						tcp_retransmission(tsk, cb->ack);
+						//retran_cnt = tsk->ssthresh;
+						tsk->ssthresh = ((tsk->cwnd/MSS)/2)*MSS;
+						tsk->cwnd = tsk->ssthresh;
+						tsk->recovery_point = tsk->snd_nxt;
+					}
+				}
+				else
+					reack_cnt = 0;
+			}
 			tsk->snd_una = max(tsk->snd_una, cb->ack);
 			tsk->adv_wnd = cb->rwnd;
-			tsk->snd_wnd = cb->rwnd;
+			tsk->snd_wnd = min(tsk->adv_wnd, tsk->cwnd);
 			wake_up(tsk->wait_send);
+			//printf("snd_una: %d, adv_wnd: %d, snd_wnd: %d, snd_nxt: %d\n", tsk->snd_una, tsk->adv_wnd, tsk->snd_wnd, tsk->snd_nxt);
+
 			if(cb->pl_len > 0)
 			{
 				if(tsk->rcv_nxt != cb->seq)
@@ -166,9 +239,10 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 				wake_up(tsk->wait_recv);
 				pthread_mutex_lock(&rcv_buf_lock);
 				write_ring_buffer(tsk->rcv_buf, cb->payload, cb->pl_len);
-				tsk->rcv_wnd -= cb->pl_len;
+				tsk->rcv_wnd -= MSS;
 				pthread_mutex_unlock(&rcv_buf_lock);
 				tsk->rcv_nxt = cb->seq_end;
+				//printf("seq: %d, seq_end: %d\n", cb->seq, cb->seq_end);
 				u8 fin_flag = 0;
 				struct tbd_data_block *tmp, *q;
 				list_for_each_entry_safe(tmp, q, &tsk->rcv_ofo_buf.list, list)
@@ -178,9 +252,10 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 						wake_up(tsk->wait_recv);
 						pthread_mutex_lock(&rcv_buf_lock);
 						write_ring_buffer(tsk->rcv_buf, tmp->packet, tmp->len);
-						tsk->rcv_wnd -= tmp->len;
+						tsk->rcv_wnd -= MSS;
 						pthread_mutex_unlock(&rcv_buf_lock);
 						tsk->rcv_nxt = tmp->seq_end;
+						//printf("seq: %d, seq_end: %d\n", tmp->seq, tmp->seq_end);
 						fin_flag = tmp->flags & TCP_FIN;
 						list_delete_entry(&tmp->list);
 						free(tmp->packet);
