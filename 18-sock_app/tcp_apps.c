@@ -40,14 +40,14 @@ void *tcp_server(void *arg)
 	log(DEBUG, "accept a connection.");
 
 	struct message_t *message;
-	char s[100];
+	char s[300];
 	tcp_sock_read(csk, s, sizeof(struct message_t));
 	message = (struct message_t*)s;
 	message->filename_len = ntohl(message->filename_len);
     message->st = ntohl(message->st);
     message->ed = ntohl(message->ed);
     FILE *fd = fopen(message->path, "r");
-    unsigned int num[26];
+    unsigned int num[50];
     memset(num, 0, sizeof(num));
     int i; char ch;
     fseek(fd, message->st, SEEK_SET);
@@ -62,7 +62,7 @@ void *tcp_server(void *arg)
 	fclose(fd);
     for(i = 0; i < 26; i++)
         num[i] = htonl(num[i]);
-    tcp_sock_write(csk, (char *)num, sizeof(num));
+    tcp_sock_write(csk, (char *)num, 104);
 
 	log(DEBUG, "close this connection.");
 	sleep(2);
